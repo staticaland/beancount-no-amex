@@ -63,7 +63,7 @@ class Importer(beangulp.Importer):
 
         Args:
             account_name: The target account name in Beancount.
-            currency: Default currency (will be auto-detected if possible).
+            currency: Default currency to use when not auto-detected from file. Defaults to 'NOK'.
             narration_to_account_mappings: Optional list of (pattern, account) tuples
                 to map narration patterns to accounts for categorization.
             flag: Transaction flag (default: "*").
@@ -156,6 +156,31 @@ class Importer(beangulp.Importer):
                 print(f"Error parsing QBO file: {traceback.format_exc()}")
             return {"transactions": [], "balance": None, "balance_date": None, "currency": None}
 
+    def _determine_currency(self, file_currency: Optional[str]) -> str:
+        """
+        Determine which currency to use for transactions based on priority:
+        1. Currency extracted from file (if available)
+        2. Default currency specified during initialization
+        3. "NOK" as last fallback
+
+        Args:
+            file_currency: Currency extracted from the QBO file, or None if not found
+
+        Returns:
+            The currency code to use for transactions
+        """
+        if file_currency:
+            if self.debug:
+                print(f"Using currency from file: {file_currency}")
+            return file_currency
+
+        if self.debug:
+            print(f"File currency not found, using default: {self.default_currency}")
+
+        # Default currency should never be None as it defaults to "NOK" in __init__,
+        # but as a safety measure, fallback to "USD" if somehow it is None
+        return self.default_currency or "NOK"
+
     def identify(self, filepath: str) -> bool:
         """Check if the file is an American Express QBO statement."""
         path = Path(filepath)
@@ -226,17 +251,28 @@ class Importer(beangulp.Importer):
         return txn  # Return unchanged if no patterns match
 
     def extract(self, filepath: str, existing_entries: List[data.Directive]) -> List[data.Directive]:
-        """Extract transactions from an American Express QBO file."""
+        """
+        Extract transactions from an American Express QBO file.
+
+        Currency is determined with the following priority:
+        1. Currency from the QBO file if available
+        2. Default currency specified in constructor (defaults to 'NOK')
+        3. 'USD' as a last-resort fallback
+
+        Args:
+            filepath: Path to the QBO file
+            existing_entries: Existing directives
+
+        Returns:
+            List of extracted directives
+        """
         entries = []
 
         parsed_data = self._parse_qbo_file(filepath)
         transactions = parsed_data["transactions"]
 
-        # Use file's currency if detected, otherwise fall back to default
-        currency = parsed_data["currency"] or self.default_currency or "USD"
-
-        if self.debug and parsed_data["currency"]:
-            print(f"Detected currency: {parsed_data['currency']}")
+        # Use the helper method to determine currency
+        currency = self._determine_currency(parsed_data["currency"])
 
         for idx, transaction in enumerate(transactions, 1):
             date = transaction["date"]
