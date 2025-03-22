@@ -1,0 +1,11 @@
+[project]
+name = "beancount-no-amex"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beancount>=3.1.0",
+    "beangulp>=0.2.0",
+    "lxml>=5.3.1",
+]
