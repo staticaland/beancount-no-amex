@@ -1,7 +1,7 @@
 import datetime
 import traceback
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import beangulp
 from beancount.core import data
@@ -53,7 +53,7 @@ class Importer(beangulp.Importer):
     def __init__(
         self,
         account_name: str,
-        currency: Optional[str] = None,
+        currency: str = "NOK",
         narration_to_account_mappings: Optional[Sequence[Tuple[str, str]]] = None,
         flag: str = "*",
         debug: bool = True,
@@ -63,7 +63,7 @@ class Importer(beangulp.Importer):
 
         Args:
             account_name: The target account name in Beancount.
-            currency: Optional default currency (will be auto-detected if not provided).
+            currency: Default currency (will be auto-detected if possible).
             narration_to_account_mappings: Optional list of (pattern, account) tuples
                 to map narration patterns to accounts for categorization.
             flag: Transaction flag (default: "*").
@@ -198,37 +198,32 @@ class Importer(beangulp.Importer):
         latest_date = max(t["date"] for t in transactions)
         return latest_date
 
-    def categorize_transaction(self, transaction_entry: data.Transaction, currency: str) -> data.Transaction:
+    def finalize(self, txn: data.Transaction, row: Any) -> Optional[data.Transaction]:
         """
-        Categorize transaction based on pattern matching in narration.
+        Post-process the transaction with categorization based on narration.
 
         Args:
-            transaction_entry: The transaction to categorize.
-            currency: The currency to use for the new posting.
+            txn: The transaction object to finalize.
+            row: The original transaction data from the QBO file.
 
         Returns:
-            The modified transaction with added posting, if a pattern matched.
+            The modified transaction, or None if invalid.
         """
         # If no categorization rules or no postings, return transaction unchanged
-        if not self.narration_to_account_mappings or not transaction_entry.postings:
-            return transaction_entry
-
-        # Get the combined narration string to match against (payee and/or memo)
-        narration = transaction_entry.narration or ""
+        if not self.narration_to_account_mappings or not txn.postings:
+            return txn  # No changes if no mappings or postings
 
         for pattern, account in self.narration_to_account_mappings:
-            if pattern in narration:
+            if pattern in txn.narration:
                 # Create a balancing posting with the opposite amount
-                main_posting = transaction_entry.postings[0]
-                opposite_units = Amount(-main_posting.units.number, currency)
+                print("herrrooooo")
+                opposite_units = Amount(-txn.postings[0].units.number, txn.postings[0].units.currency)
                 balancing_posting = data.Posting(
                     account, opposite_units, None, None, None, None
                 )
                 # Append the new posting
-                new_postings = transaction_entry.postings + [balancing_posting]
-                return transaction_entry._replace(postings=new_postings)
-
-        return transaction_entry  # Return unchanged if no patterns match
+                return txn._replace(postings=txn.postings + [balancing_posting])
+        return txn  # Return unchanged if no patterns match
 
     def extract(self, filepath: str, existing_entries: List[data.Directive]) -> List[data.Directive]:
         """Extract transactions from an American Express QBO file."""
@@ -244,7 +239,6 @@ class Importer(beangulp.Importer):
             print(f"Detected currency: {parsed_data['currency']}")
 
         for idx, transaction in enumerate(transactions, 1):
-
             date = transaction["date"]
             payee = transaction["payee"]
             memo = transaction["memo"]
@@ -265,7 +259,7 @@ class Importer(beangulp.Importer):
             posting = data.Posting(self.account_name, amount_obj, None, None, None, None)
 
             # Create transaction
-            transaction_entry = data.Transaction(
+            txn = data.Transaction(
                 meta=meta,
                 date=date,
                 flag=self.flag,
@@ -276,36 +270,12 @@ class Importer(beangulp.Importer):
                 postings=[posting],
             )
 
-            # Apply pattern-based categorization
-            transaction_entry = self.categorize_transaction(transaction_entry, currency)
+            txn = self.finalize(txn, transaction)
 
-            entries.append(transaction_entry)
+            # Skip if finalize returned None
+            if txn is None:
+                continue
 
-        # Add balance assertion if available
-        if parsed_data["balance"] is not None:
-            bal_amount = D(str(parsed_data["balance"]))
-
-            # Determine the date for the balance assertion
-            if parsed_data["balance_date"]:
-                bal_date = parsed_data["balance_date"]
-            elif transactions:
-                # If no explicit balance date, use the day after the latest transaction
-                latest_date = max(t["date"] for t in transactions)
-                bal_date = latest_date + datetime.timedelta(days=1)
-            else:
-                bal_date = datetime.date.today()
-
-            # Create the balance assertion
-            meta = data.new_metadata(filepath, 0)
-            balance_entry = data.Balance(
-                meta=meta,
-                date=bal_date,
-                account=self.account_name,
-                amount=Amount(bal_amount, currency),
-                tolerance=None,
-                diff_amount=None
-            )
-
-            entries.append(balance_entry)
+            entries.append(txn)
 
         return entries
