@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import beangulp
+from beangulp.testing import main as test_main
 from beancount.core import data
 from beancount.core.amount import Amount
 from beancount.core.number import D
@@ -315,3 +316,16 @@ class Importer(beangulp.Importer):
             entries.append(txn)
 
         return entries
+
+if __name__ == '__main__':
+    # This enables the testing CLI commands
+    test_main(Importer(
+        'Liabilities:CreditCard:Amex',
+        narration_to_account_mappings=[
+            ('GITHUB', 'Expenses:Cloud-Services:Source-Hosting:Github'),
+            ('Fedex', 'Expenses:Postage:FedEx'),
+            ('FREMTIND', 'Expenses:Insurance'),
+            ('Meny Alna Oslo', 'Expenses:Groceries'),
+            ('ANDERS', 'Expenses:Groceries'),
+        ]
+    ))

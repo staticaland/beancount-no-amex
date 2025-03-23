@@ -10,6 +10,9 @@ default:
 check:
     ruff check {{path}}
 
+test:
+    uv run beancount_no_amex/credit.py test test_data
+
 # Format all files in the specified directory (and any subdirectories)
 format:
     ruff format {{path}}
