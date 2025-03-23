@@ -43,6 +43,7 @@
   type: "DEBIT"
   memo: "LINA HANSEN-81023"
   Liabilities:CreditCard:Amex  -742.18 NOK
+  Expenses:Groceries            742.18 NOK
 
 2025-03-20 * "NETFLIX SUBSCRIPTION NFLXPAY" "NETFLIX SUBSCRIPTION NFLXPAY"
   id: "AT250800024000010006789"

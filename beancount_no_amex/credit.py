@@ -242,7 +242,6 @@ class Importer(beangulp.Importer):
         for pattern, account in self.narration_to_account_mappings:
             if pattern in txn.narration:
                 # Create a balancing posting with the opposite amount
-                print("herrrooooo")
                 opposite_units = Amount(-txn.postings[0].units.number, txn.postings[0].units.currency)
                 balancing_posting = data.Posting(
                     account, opposite_units, None, None, None, None
@@ -326,6 +325,6 @@ if __name__ == '__main__':
             ('Fedex', 'Expenses:Postage:FedEx'),
             ('FREMTIND', 'Expenses:Insurance'),
             ('Meny Alna Oslo', 'Expenses:Groceries'),
-            ('ANDERS', 'Expenses:Groceries'),
+            ('VINMONOPOLET', 'Expenses:Groceries'),
         ]
     ))
