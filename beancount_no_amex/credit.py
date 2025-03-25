@@ -1,8 +1,7 @@
 import datetime
 import traceback
-from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import beangulp
 from beangulp.testing import main as test_main
@@ -84,6 +83,7 @@ class Importer(beangulp.Importer):
         """Parse the QBO file and extract transactions and balance info using lxml."""
         result = QboFileData()
 
+        print("herrrrrroooo")
         try:
             # Parse the file with recovery mode for potentially malformed XML
             parser = etree.XMLParser(recover=True)
