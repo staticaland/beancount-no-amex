@@ -1,5 +1,4 @@
 import datetime
-import sys
 import traceback
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple
@@ -12,12 +11,7 @@ from beancount.core.number import D
 from lxml import etree
 from pydantic import ValidationError
 
-# Handle imports when running as a script or as a module
-try:
-    from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
-except ModuleNotFoundError:
-    # When running the script directly
-    from models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
+from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
 
 
 def parse_ofx_time(date_str: str) -> datetime.datetime:
@@ -88,8 +82,6 @@ class Importer(beangulp.Importer):
     def _parse_qbo_file(self, filepath: str) -> QboFileData:
         """Parse the QBO file and extract transactions and balance info using lxml."""
         result = QboFileData()
-
-        print("herrrrrroooo")
         try:
             # Parse the file with recovery mode for potentially malformed XML
             parser = etree.XMLParser(recover=True)
@@ -360,7 +352,8 @@ class Importer(beangulp.Importer):
 
         return entries
 
-if __name__ == '__main__':
+def main():
+    """Entry point for the command-line interface."""
     # This enables the testing CLI commands
     test_main(Importer(
         'Liabilities:CreditCard:Amex',
@@ -372,3 +365,6 @@ if __name__ == '__main__':
             ('VINMONOPOLET', 'Expenses:Groceries'),
         ]
     ))
+
+if __name__ == '__main__':
+    main()
