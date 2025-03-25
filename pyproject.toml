@@ -1,7 +1,7 @@
 [project]
 name = "beancount-no-amex"
 version = "0.1.0"
-description = "Add your description here"
+description = "A library that converts transaction data from American Express cards issued in Norway into structured Beancount accounting format."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -16,6 +16,10 @@ include = ["beancount_no_amex"]
 
 [tool.uv]
 package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project.scripts]
 beancount-no-amex = "beancount_no_amex.credit:main"
