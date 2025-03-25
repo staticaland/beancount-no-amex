@@ -1,4 +1,5 @@
 import datetime
+import sys
 import traceback
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple
@@ -11,7 +12,12 @@ from beancount.core.number import D
 from lxml import etree
 from pydantic import ValidationError
 
-from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
+# Handle imports when running as a script or as a module
+try:
+    from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
+except ModuleNotFoundError:
+    # When running the script directly
+    from models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
 
 
 def parse_ofx_time(date_str: str) -> datetime.datetime:
