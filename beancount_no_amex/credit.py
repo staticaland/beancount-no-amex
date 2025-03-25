@@ -1,5 +1,6 @@
 import datetime
 import traceback
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -9,6 +10,9 @@ from beancount.core import data
 from beancount.core.amount import Amount
 from beancount.core.number import D
 from lxml import etree
+from pydantic import ValidationError
+
+from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
 
 
 def parse_ofx_time(date_str: str) -> datetime.datetime:
@@ -76,14 +80,9 @@ class Importer(beangulp.Importer):
         self.flag = flag
         self.debug = debug
 
-    def _parse_qbo_file(self, filepath: str) -> Dict:
+    def _parse_qbo_file(self, filepath: str) -> QboFileData:
         """Parse the QBO file and extract transactions and balance info using lxml."""
-        result = {
-            "transactions": [],
-            "balance": None,
-            "balance_date": None,
-            "currency": None  # Added currency to the result
-        }
+        result = QboFileData()
 
         try:
             # Parse the file with recovery mode for potentially malformed XML
@@ -92,21 +91,21 @@ class Importer(beangulp.Importer):
                 tree = etree.parse(f, parser)
 
             # Extract currency information
-            result["currency"] = find_currency(tree)
+            result.currency = find_currency(tree)
 
             # Extract balance information
             ledger_bal = tree.find(".//LEDGERBAL")
             if ledger_bal is not None:
                 bal_amt = ledger_bal.findtext("BALAMT")
                 if bal_amt:
-                    result["balance"] = bal_amt
+                    result.balance = bal_amt
 
                     # Try to get the balance date if available
                     dtasof = ledger_bal.findtext("DTASOF")
                     if dtasof:
                         try:
                             # Use the parse_ofx_time function
-                            result["balance_date"] = parse_ofx_time(dtasof).date()
+                            result.balance_date = parse_ofx_time(dtasof).date()
                         except ValueError:
                             pass
 
@@ -114,8 +113,6 @@ class Importer(beangulp.Importer):
             stmttrn_elements = tree.findall(".//STMTTRN")
 
             for idx, element in enumerate(stmttrn_elements, 1):
-                transaction = {}
-
                 # Extract key fields
                 dtposted = element.findtext("DTPOSTED")
                 trnamt = element.findtext("TRNAMT")
@@ -124,38 +121,28 @@ class Importer(beangulp.Importer):
                 fitid = element.findtext("FITID")
                 trntype = element.findtext("TRNTYPE")
 
-                # Date parsing using parse_ofx_time
-                if dtposted:
-                    try:
-                        transaction["date"] = parse_ofx_time(dtposted).date()
-                    except ValueError:
-                        continue
-                else:
-                    continue
-
-                # Amount
-                transaction["amount"] = trnamt if trnamt else "0.00"
-
-                # Payee and Memo (optional)
-                transaction["payee"] = name.strip() if name else None
-                transaction["memo"] = memo.strip() if memo else ""
-
-                # Optional fields for metadata
-                transaction["id"] = fitid if fitid else None
-                transaction["type"] = trntype if trntype else None
-
-                result["transactions"].append(transaction)
+                # Create raw transaction
+                raw_txn = RawTransaction(
+                    date=dtposted,
+                    amount=trnamt if trnamt else "0.00",
+                    payee=name.strip() if name else None,
+                    memo=memo.strip() if memo else "",
+                    id=fitid if fitid else None,
+                    type=trntype if trntype else None
+                )
+                
+                result.transactions.append(raw_txn)
 
             return result
 
         except etree.XMLSyntaxError as e:
             if self.debug:
                 print(f"XML syntax error: {e}")
-            return {"transactions": [], "balance": None, "balance_date": None, "currency": None}
+            return QboFileData()
         except Exception as e:
             if self.debug:
                 print(f"Error parsing QBO file: {traceback.format_exc()}")
-            return {"transactions": [], "balance": None, "balance_date": None, "currency": None}
+            return QboFileData()
 
     def _determine_currency(self, file_currency: Optional[str]) -> str:
         """
@@ -216,12 +203,29 @@ class Importer(beangulp.Importer):
     def date(self, filepath: str) -> Optional[datetime.date]:
         """Extract the latest transaction date from the file."""
         parsed_data = self._parse_qbo_file(filepath)
-        transactions = parsed_data["transactions"]
+        
+        # Convert raw transactions to parsed transactions
+        parsed_transactions = []
+        for raw_txn in parsed_data.transactions:
+            try:
+                if raw_txn.date:
+                    date_val = parse_ofx_time(raw_txn.date).date()
+                    parsed_txn = ParsedTransaction(
+                        date=date_val,
+                        amount=raw_txn.amount or "0.00",
+                        payee=raw_txn.payee,
+                        memo=raw_txn.memo,
+                        id=raw_txn.id,
+                        type=raw_txn.type
+                    )
+                    parsed_transactions.append(parsed_txn)
+            except (ValueError, ValidationError):
+                continue
 
-        if not transactions:
+        if not parsed_transactions:
             return datetime.date.today()
 
-        latest_date = max(t["date"] for t in transactions)
+        latest_date = max(t.date for t in parsed_transactions)
         return latest_date
 
     def finalize(self, txn: data.Transaction, row: Any) -> Optional[data.Transaction]:
@@ -257,7 +261,7 @@ class Importer(beangulp.Importer):
         Currency is determined with the following priority:
         1. Currency from the QBO file if available
         2. Default currency specified in constructor (defaults to 'NOK')
-        3. 'USD' as a last-resort fallback
+        3. 'NOK' as a last-resort fallback
 
         Args:
             filepath: Path to the QBO file
@@ -268,51 +272,85 @@ class Importer(beangulp.Importer):
         """
         entries = []
 
-        parsed_data = self._parse_qbo_file(filepath)
-        transactions = parsed_data["transactions"]
-
+        qbo_data = self._parse_qbo_file(filepath)
+        
         # Use the helper method to determine currency
-        currency = self._determine_currency(parsed_data["currency"])
+        currency = self._determine_currency(qbo_data.currency)
 
-        for idx, transaction in enumerate(transactions, 1):
-            date = transaction["date"]
-            payee = transaction["payee"]
-            memo = transaction["memo"]
-            narration = payee or ""
-
-            # Metadata
-            meta = data.new_metadata(filepath, idx)
-            if transaction["id"]:
-                meta["id"] = transaction["id"]
-            if transaction["type"]:
-                meta["type"] = transaction["type"]
-            if memo:
-                meta["memo"] = memo
-
-            # Amount (inverted for credit card)
-            amount = D(str(transaction["amount"]))
-            amount_obj = Amount(amount, currency)
-            posting = data.Posting(self.account_name, amount_obj, None, None, None, None)
-
-            # Create transaction
-            txn = data.Transaction(
-                meta=meta,
-                date=date,
-                flag=self.flag,
-                payee=payee,
-                narration=narration,
-                tags=set(),
-                links=set(),
-                postings=[posting],
-            )
-
-            txn = self.finalize(txn, transaction)
-
-            # Skip if finalize returned None
-            if txn is None:
+        # Convert raw transactions to bean transactions
+        for idx, raw_txn in enumerate(qbo_data.transactions, 1):
+            try:
+                # Parse the date
+                if not raw_txn.date:
+                    continue
+                    
+                txn_date = parse_ofx_time(raw_txn.date).date()
+                
+                # Create parsed transaction
+                parsed_txn = ParsedTransaction(
+                    date=txn_date,
+                    amount=raw_txn.amount or "0.00",
+                    payee=raw_txn.payee,
+                    memo=raw_txn.memo,
+                    id=raw_txn.id,
+                    type=raw_txn.type
+                )
+                
+                # Create bean transaction
+                narration = parsed_txn.payee or ""
+                metadata = {}
+                if parsed_txn.id:
+                    metadata["id"] = parsed_txn.id
+                if parsed_txn.type:
+                    metadata["type"] = parsed_txn.type
+                if parsed_txn.memo:
+                    metadata["memo"] = parsed_txn.memo
+                
+                bean_txn = BeanTransaction(
+                    date=parsed_txn.date,
+                    amount=parsed_txn.amount,
+                    currency=currency,
+                    payee=parsed_txn.payee,
+                    narration=narration,
+                    flag=self.flag,
+                    account=self.account_name,
+                    metadata=metadata
+                )
+                
+                # Create Beancount metadata
+                meta = data.new_metadata(filepath, idx)
+                for key, value in bean_txn.metadata.items():
+                    meta[key] = value
+                
+                # Create Beancount amount
+                amount_obj = Amount(D(str(bean_txn.amount)), bean_txn.currency)
+                posting = data.Posting(bean_txn.account, amount_obj, None, None, None, None)
+                
+                # Create Beancount transaction
+                txn = data.Transaction(
+                    meta=meta,
+                    date=bean_txn.date,
+                    flag=bean_txn.flag,
+                    payee=bean_txn.payee,
+                    narration=bean_txn.narration,
+                    tags=bean_txn.tags,
+                    links=bean_txn.links,
+                    postings=[posting],
+                )
+                
+                # Apply finalization (for categorization)
+                txn = self.finalize(txn, parsed_txn)
+                
+                # Skip if finalize returned None
+                if txn is None:
+                    continue
+                
+                entries.append(txn)
+                
+            except (ValueError, ValidationError) as e:
+                if self.debug:
+                    print(f"Error processing transaction {idx}: {e}")
                 continue
-
-            entries.append(txn)
 
         return entries
 
