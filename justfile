@@ -11,7 +11,7 @@ check:
     ruff check {{path}}
 
 test:
-    uv run beancount_no_amex/credit.py test test_data
+    uv run beancount-no-amex test test_data
 
 # Format all files in the specified directory (and any subdirectories)
 format:
