@@ -9,3 +9,6 @@ dependencies = [
     "beangulp>=0.2.0",
     "lxml>=5.3.1",
 ]
+
+[tool.setuptools.packages.find]
+include = ["beancount_no_amex"]
