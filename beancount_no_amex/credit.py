@@ -2,6 +2,7 @@ import datetime
 import traceback
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
 
 import beangulp
 from beangulp.testing import main as test_main
@@ -12,6 +13,15 @@ from lxml import etree
 from pydantic import ValidationError
 
 from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
+
+
+# Added dataclass definition
+@dataclass
+class AmexAccountConfig:
+    """Configuration for an American Express QBO account."""
+    account_name: str
+    currency: str
+    narration_to_account_mappings: List[Tuple[str, str]] = field(default_factory=list)
 
 
 def parse_ofx_time(date_str: str) -> datetime.datetime:
@@ -56,26 +66,22 @@ class Importer(beangulp.Importer):
 
     def __init__(
         self,
-        account_name: str,
-        currency: str = "NOK",
-        narration_to_account_mappings: Optional[Sequence[Tuple[str, str]]] = None,
+        config: AmexAccountConfig,  # Accept config object
         flag: str = "*",
         debug: bool = True,
     ):
         """
-        Initialize the American Express QBO importer.
+        Initialize the American Express QBO importer using a configuration object.
 
         Args:
-            account_name: The target account name in Beancount.
-            currency: Default currency to use when not auto-detected from file. Defaults to 'NOK'.
-            narration_to_account_mappings: Optional list of (pattern, account) tuples
-                to map narration patterns to accounts for categorization.
+            config: An AmexAccountConfig object with account details.
             flag: Transaction flag (default: "*").
             debug: Enable debug output (default: True).
         """
-        self.account_name = account_name
-        self.default_currency = currency  # Store as default currency
-        self.narration_to_account_mappings = narration_to_account_mappings or []
+        # Store configuration values from the config object
+        self.account_name = config.account_name
+        self.currency = config.currency  # Store configured currency
+        self.narration_to_account_mappings = config.narration_to_account_mappings
         self.flag = flag
         self.debug = debug
 
@@ -161,11 +167,11 @@ class Importer(beangulp.Importer):
             return file_currency
 
         if self.debug:
-            print(f"File currency not found, using default: {self.default_currency}")
+            print(f"File currency not found, using default: {self.currency}")
 
         # Default currency should never be None as it defaults to "NOK" in __init__,
         # but as a safety measure, fallback to "USD" if somehow it is None
-        return self.default_currency or "NOK"
+        return self.currency or "NOK"
 
     def identify(self, filepath: str) -> bool:
         """Check if the file is an American Express QBO statement."""
@@ -256,99 +262,137 @@ class Importer(beangulp.Importer):
         """
         Extract transactions from an American Express QBO file.
 
-        Currency is determined with the following priority:
-        1. Currency from the QBO file if available
-        2. Default currency specified in constructor (defaults to 'NOK')
-        3. 'NOK' as a last-resort fallback
+        Currency is determined by first checking the QBO file, and falling back
+        to the currency specified in the importer configuration.
 
         Args:
             filepath: Path to the QBO file
-            existing_entries: Existing directives
+            existing_entries: Existing directives (used for potential deduplication)
 
         Returns:
-            List of extracted directives
+            List of extracted Beancount directives (Transactions and Balance).
         """
         entries = []
 
+        # 1. Parse the QBO file content
         qbo_data = self._parse_qbo_file(filepath)
-        
-        # Use the helper method to determine currency
+        if not qbo_data:  # Check if parsing returned data
+            if self.debug:
+                print(f"Skipping file {filepath} due to parsing errors or empty content.")
+            return []
+
+        # 2. Determine the currency to use
         currency = self._determine_currency(qbo_data.currency)
 
-        # Convert raw transactions to bean transactions
+        # 3. Process each raw transaction
         for idx, raw_txn in enumerate(qbo_data.transactions, 1):
             try:
-                # Parse the date
+                # 3a. Validate and parse essential raw data
                 if not raw_txn.date:
+                    if self.debug:
+                        print(f"Skipping transaction {idx} in {filepath} due to missing date.")
                     continue
-                    
+
                 txn_date = parse_ofx_time(raw_txn.date).date()
-                
-                # Create parsed transaction
-                parsed_txn = ParsedTransaction(
-                    date=txn_date,
-                    amount=raw_txn.amount or "0.00",
-                    payee=raw_txn.payee,
-                    memo=raw_txn.memo,
-                    id=raw_txn.id,
-                    type=raw_txn.type
+                amount_str = raw_txn.amount or "0.00"
+                payee = raw_txn.payee # Can be None
+                memo = raw_txn.memo or "" # Ensure memo is a string
+                txn_id = raw_txn.id
+                txn_type = raw_txn.type
+
+                # 3b. Prepare Beancount data
+                # Use payee as narration, fallback to memo if payee is missing
+                narration = payee if payee else memo
+                metadata = data.new_metadata(filepath, idx) # Start with standard metadata
+
+                # Add specific metadata if available
+                if txn_id:
+                    metadata["id"] = txn_id
+                if txn_type:
+                    metadata["type"] = txn_type
+                # Add memo to metadata only if it's not already used as narration
+                if memo and payee:
+                    metadata["memo"] = memo
+
+                # 3c. Create the primary posting for the credit card account
+                try:
+                    # Convert amount string to Decimal
+                    amount_decimal = D(str(amount_str))
+                except Exception as e:
+                     if self.debug:
+                         print(f"Skipping transaction {idx} in {filepath} due to invalid amount '{amount_str}': {e}")
+                     continue
+
+                amount_obj = Amount(amount_decimal, currency)
+                primary_posting = data.Posting(
+                    self.account_name, amount_obj, None, None, None, None
                 )
-                
-                # Create bean transaction
-                narration = parsed_txn.payee or ""
-                metadata = {}
-                if parsed_txn.id:
-                    metadata["id"] = parsed_txn.id
-                if parsed_txn.type:
-                    metadata["type"] = parsed_txn.type
-                if parsed_txn.memo:
-                    metadata["memo"] = parsed_txn.memo
-                
-                bean_txn = BeanTransaction(
-                    date=parsed_txn.date,
-                    amount=parsed_txn.amount,
-                    currency=currency,
-                    payee=parsed_txn.payee,
-                    narration=narration,
-                    flag=self.flag,
-                    account=self.account_name,
-                    metadata=metadata
-                )
-                
-                # Create Beancount metadata
-                meta = data.new_metadata(filepath, idx)
-                for key, value in bean_txn.metadata.items():
-                    meta[key] = value
-                
-                # Create Beancount amount
-                amount_obj = Amount(D(str(bean_txn.amount)), bean_txn.currency)
-                posting = data.Posting(bean_txn.account, amount_obj, None, None, None, None)
-                
-                # Create Beancount transaction
+
+                # 3d. Create the initial Beancount transaction (without balancing posting yet)
                 txn = data.Transaction(
-                    meta=meta,
-                    date=bean_txn.date,
-                    flag=bean_txn.flag,
-                    payee=bean_txn.payee,
-                    narration=bean_txn.narration,
-                    tags=bean_txn.tags,
-                    links=bean_txn.links,
-                    postings=[posting],
+                    meta=metadata,
+                    date=txn_date,
+                    flag=self.flag,
+                    payee=payee, # Keep original payee (can be None)
+                    narration=narration,
+                    tags=data.EMPTY_SET, # Initialize tags/links
+                    links=data.EMPTY_SET,
+                    postings=[primary_posting],
                 )
-                
-                # Apply finalization (for categorization)
-                txn = self.finalize(txn, parsed_txn)
-                
-                # Skip if finalize returned None
-                if txn is None:
+
+                # 3e. Apply finalization logic (adds balancing posting)
+                finalized_txn = self.finalize(txn, raw_txn) # Pass raw_txn for context
+
+                # Skip if finalization failed or indicated skipping
+                if finalized_txn is None:
+                    if self.debug:
+                        print(f"Skipping transaction {idx} in {filepath} after finalization.")
                     continue
-                
-                entries.append(txn)
-                
-            except (ValueError, ValidationError) as e:
+
+                # 3f. Add the completed transaction to the list
+                entries.append(finalized_txn)
+
+            except (ValueError, ValidationError) as e: # Catch known parsing/validation errors
                 if self.debug:
-                    print(f"Error processing transaction {idx}: {e}")
+                    print(f"Error processing transaction {idx} in {filepath}: {e}\nRaw data: {raw_txn}")
                 continue
+            except Exception as e: # Catch unexpected errors during processing
+                 if self.debug:
+                     print(f"Unexpected error processing transaction {idx} in {filepath}: {e}\n{traceback.format_exc()}")
+                 continue # Skip to next transaction
+
+        # 4. Add balance assertion if available
+        if qbo_data.balance is not None and qbo_data.balance_date:
+            try:
+                balance_decimal = D(str(qbo_data.balance))
+                # QBO balance is typically the balance *at the end* of the statement date.
+                # Beancount balance assertion applies at the *start* of the day.
+                # So, we assert the balance for the day *after* the statement balance date.
+                balance_assertion_date = qbo_data.balance_date + datetime.timedelta(days=1)
+
+                balance_amount = Amount(balance_decimal, currency)
+                balance_meta = data.new_metadata(filepath, 0) # Metadata for balance assertion
+
+                balance_entry = data.Balance(
+                    meta=balance_meta,
+                    date=balance_assertion_date,
+                    account=self.account_name,
+                    amount=balance_amount,
+                    tolerance=None, # Default tolerance
+                    diff_amount=None
+                )
+                entries.append(balance_entry)
+                if self.debug:
+                    print(f"Added balance assertion for {self.account_name} on {balance_assertion_date}: {balance_amount}")
+
+            except Exception as e: # Catch potential errors creating balance assertion
+                 if self.debug:
+                     print(f"Could not create balance assertion for {filepath}: {e}")
+
+        # (Optional: Add deduplication logic here if needed in the future)
+        # from beangulp import extract, similar
+        # comparator = similar.heuristic_comparator(...)
+        # extract.mark_duplicate_entries(entries, existing_entries, ...)
 
         return entries
 
@@ -356,14 +400,17 @@ def main():
     """Entry point for the command-line interface."""
     # This enables the testing CLI commands
     test_main(Importer(
-        'Liabilities:CreditCard:Amex',
-        narration_to_account_mappings=[
-            ('GITHUB', 'Expenses:Cloud-Services:Source-Hosting:Github'),
-            ('Fedex', 'Expenses:Postage:FedEx'),
-            ('FREMTIND', 'Expenses:Insurance'),
-            ('Meny Alna Oslo', 'Expenses:Groceries'),
-            ('VINMONOPOLET', 'Expenses:Groceries'),
-        ]
+        AmexAccountConfig(
+            account_name='Liabilities:CreditCard:Amex',
+            currency='NOK',
+            narration_to_account_mappings=[
+                ('GITHUB', 'Expenses:Cloud-Services:Source-Hosting:Github'),
+                ('Fedex', 'Expenses:Postage:FedEx'),
+                ('FREMTIND', 'Expenses:Insurance'),
+                ('Meny Alna Oslo', 'Expenses:Groceries'),
+                ('VINMONOPOLET', 'Expenses:Groceries'),
+            ]
+        )
     ))
 
 if __name__ == '__main__':
