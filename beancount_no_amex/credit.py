@@ -173,25 +173,13 @@ class Importer(beangulp.Importer):
     def identify(self, filepath: str) -> bool:
         """Check if the file is an American Express QBO statement."""
         path = Path(filepath)
-
-        # Check file extension first (quick check)
-        if path.suffix.lower() != ".qbo":
-            return False
-
-        # Check for compatible MIME types
         mime_type = beangulp.mimetypes.guess_type(filepath, strict=False)[0]
-        if mime_type not in {
-            'application/x-ofx',
-            'application/vnd.intu.qbo',
-            'application/vnd.intu.qfx'
-        }:
-            return False
 
-        # Check for Amex-specific filename pattern
-        if path.name.lower().startswith("activity"):
-            return True
-
-        return False
+        return (
+            path.suffix.lower() == ".qbo"
+            and mime_type in {'application/x-ofx', 'application/vnd.intu.qbo', 'application/vnd.intu.qfx'}
+            and path.name.lower().startswith("activity")
+        )
 
     def account(self, filepath: str) -> str:
         """Return the account name for the file."""
