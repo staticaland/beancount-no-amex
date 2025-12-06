@@ -46,19 +46,16 @@ def find_currency(tree) -> Optional[str]:
         A string with the currency code, or None if not found
     """
     # Look for CURDEF tags in statement response sections
-    for stmt_type in ['STMTRS', 'CCSTMTRS', 'INVSTMTRS']:
-        curdef_elements = tree.xpath(f".//*[contains(local-name(), '{stmt_type}')]/CURDEF")
-        for element in curdef_elements:
-            if element.text and element.text.strip():
-                return element.text.strip()
+    for stmt_type in ('STMTRS', 'CCSTMTRS', 'INVSTMTRS'):
+        for elem in tree.xpath(f".//*[contains(local-name(), '{stmt_type}')]/CURDEF"):
+            if text := (elem.text or "").strip():
+                return text
 
-    # If not found in statement sections, try finding any CURDEF tag
-    curdef_elements = tree.xpath(".//CURDEF")
-    for element in curdef_elements:
-        if element.text and element.text.strip():
-            return element.text.strip()
-
-    return None
+    # Fallback: find any CURDEF tag in the document
+    return next(
+        (elem.text.strip() for elem in tree.xpath(".//CURDEF") if elem.text and elem.text.strip()),
+        None,
+    )
 
 
 class Importer(beangulp.Importer):
