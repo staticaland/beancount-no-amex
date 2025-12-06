@@ -301,7 +301,7 @@ class Importer(beangulp.Importer):
                 # 3c. Create the primary posting for the credit card account
                 try:
                     # Convert amount string to Decimal
-                    amount_decimal = D(str(amount_str))
+                    amount_decimal = D(amount_str)
                 except Exception as e:
                      if self.debug:
                          print(f"Skipping transaction {idx} in {filepath} due to invalid amount '{amount_str}': {e}")
@@ -348,7 +348,7 @@ class Importer(beangulp.Importer):
         # 4. Add balance assertion if available
         if qbo_data.balance is not None and qbo_data.balance_date:
             try:
-                balance_decimal = D(str(qbo_data.balance))
+                balance_decimal = D(qbo_data.balance)
                 # QBO balance is typically the balance *at the end* of the statement date.
                 # Beancount balance assertion applies at the *start* of the day.
                 # So, we assert the balance for the day *after* the statement balance date.
