@@ -14,8 +14,18 @@ from pydantic import ValidationError
 
 from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
 
+# Constants
+DEFAULT_CURRENCY = "NOK"
+OFX_DATE_FORMAT = "%Y%m%d"
+OFX_DATETIME_FORMAT = "%Y%m%d%H%M%S"
+OFX_STATEMENT_TYPES = ("STMTRS", "CCSTMTRS", "INVSTMTRS")
+VALID_MIME_TYPES = frozenset({
+    "application/x-ofx",
+    "application/vnd.intu.qbo",
+    "application/vnd.intu.qfx",
+})
 
-# Added dataclass definition
+
 @dataclass
 class AmexAccountConfig:
     """Configuration for an American Express QBO account."""
@@ -33,8 +43,8 @@ def parse_ofx_time(date_str: str) -> datetime.datetime:
         A datetime.datetime instance.
     """
     if len(date_str) < 14:
-        return datetime.datetime.strptime(date_str[:8], '%Y%m%d')
-    return datetime.datetime.strptime(date_str[:14], '%Y%m%d%H%M%S')
+        return datetime.datetime.strptime(date_str[:8], OFX_DATE_FORMAT)
+    return datetime.datetime.strptime(date_str[:14], OFX_DATETIME_FORMAT)
 
 
 def find_currency(tree) -> str | None:
@@ -46,7 +56,7 @@ def find_currency(tree) -> str | None:
         A string with the currency code, or None if not found
     """
     # Look for CURDEF tags in statement response sections
-    for stmt_type in ('STMTRS', 'CCSTMTRS', 'INVSTMTRS'):
+    for stmt_type in OFX_STATEMENT_TYPES:
         for elem in tree.xpath(f".//*[contains(local-name(), '{stmt_type}')]/CURDEF"):
             if text := (elem.text or "").strip():
                 return text
@@ -166,9 +176,8 @@ class Importer(beangulp.Importer):
         if self.debug:
             print(f"File currency not found, using default: {self.currency}")
 
-        # Default currency should never be None as it defaults to "NOK" in __init__,
-        # but as a safety measure, fallback to "USD" if somehow it is None
-        return self.currency or "NOK"
+        # Default currency should never be None, but use DEFAULT_CURRENCY as fallback
+        return self.currency or DEFAULT_CURRENCY
 
     def identify(self, filepath: str) -> bool:
         """Check if the file is an American Express QBO statement."""
@@ -177,7 +186,7 @@ class Importer(beangulp.Importer):
 
         return (
             path.suffix.lower() == ".qbo"
-            and mime_type in {'application/x-ofx', 'application/vnd.intu.qbo', 'application/vnd.intu.qfx'}
+            and mime_type in VALID_MIME_TYPES
             and path.name.lower().startswith("activity")
         )
 
