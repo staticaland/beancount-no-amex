@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Optional, Set
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class RawTransaction(BaseModel):
@@ -24,12 +24,11 @@ class ParsedTransaction(BaseModel):
     id: Optional[str] = None
     type: Optional[str] = None
     
-    @validator('amount')
+    @field_validator('amount', mode='before')
+    @classmethod
     def validate_amount(cls, v):
         """Ensure amount is a valid decimal."""
-        if isinstance(v, str):
-            return Decimal(v)
-        return v
+        return Decimal(v) if isinstance(v, str) else v
 
 
 class BeanTransaction(BaseModel):
