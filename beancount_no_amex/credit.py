@@ -128,11 +128,11 @@ class Importer(beangulp.Importer):
                 # Create raw transaction
                 raw_txn = RawTransaction(
                     date=dtposted,
-                    amount=trnamt if trnamt else "0.00",
+                    amount=trnamt or "0.00",
                     payee=name.strip() if name else None,
-                    memo=memo.strip() if memo else "",
-                    id=fitid if fitid else None,
-                    type=trntype if trntype else None
+                    memo=(memo or "").strip(),
+                    id=fitid,
+                    type=trntype,
                 )
                 
                 result.transactions.append(raw_txn)
@@ -295,14 +295,13 @@ class Importer(beangulp.Importer):
 
                 txn_date = parse_ofx_time(raw_txn.date).date()
                 amount_str = raw_txn.amount or "0.00"
-                payee = raw_txn.payee # Can be None
-                memo = raw_txn.memo or "" # Ensure memo is a string
+                payee = raw_txn.payee
+                memo = raw_txn.memo or ""
                 txn_id = raw_txn.id
                 txn_type = raw_txn.type
 
-                # 3b. Prepare Beancount data
                 # Use payee as narration, fallback to memo if payee is missing
-                narration = payee if payee else memo
+                narration = payee or memo
                 metadata = data.new_metadata(filepath, idx) # Start with standard metadata
 
                 # Add specific metadata if available
