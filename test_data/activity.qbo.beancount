@@ -56,3 +56,5 @@
   type: "CREDIT"
   memo: "LINA HANSEN-81023"
   Liabilities:CreditCard:Amex  5000.00 NOK
+
+2025-03-23 balance Liabilities:CreditCard:Amex                     -35768.92 NOK

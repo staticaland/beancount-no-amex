@@ -1,7 +1,7 @@
 import datetime
 import traceback
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any
 from dataclasses import dataclass, field
 
 import beangulp
@@ -14,14 +14,24 @@ from pydantic import ValidationError
 
 from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
 
+# Constants
+DEFAULT_CURRENCY = "NOK"
+OFX_DATE_FORMAT = "%Y%m%d"
+OFX_DATETIME_FORMAT = "%Y%m%d%H%M%S"
+OFX_STATEMENT_TYPES = ("STMTRS", "CCSTMTRS", "INVSTMTRS")
+VALID_MIME_TYPES = frozenset({
+    "application/x-ofx",
+    "application/vnd.intu.qbo",
+    "application/vnd.intu.qfx",
+})
 
-# Added dataclass definition
+
 @dataclass
 class AmexAccountConfig:
     """Configuration for an American Express QBO account."""
     account_name: str
     currency: str
-    narration_to_account_mappings: List[Tuple[str, str]] = field(default_factory=list)
+    narration_to_account_mappings: list[tuple[str, str]] = field(default_factory=list)
 
 
 def parse_ofx_time(date_str: str) -> datetime.datetime:
@@ -33,11 +43,11 @@ def parse_ofx_time(date_str: str) -> datetime.datetime:
         A datetime.datetime instance.
     """
     if len(date_str) < 14:
-        return datetime.datetime.strptime(date_str[:8], '%Y%m%d')
-    return datetime.datetime.strptime(date_str[:14], '%Y%m%d%H%M%S')
+        return datetime.datetime.strptime(date_str[:8], OFX_DATE_FORMAT)
+    return datetime.datetime.strptime(date_str[:14], OFX_DATETIME_FORMAT)
 
 
-def find_currency(tree) -> Optional[str]:
+def find_currency(tree) -> str | None:
     """Find the currency specified in the OFX file.
 
     Args:
@@ -46,19 +56,16 @@ def find_currency(tree) -> Optional[str]:
         A string with the currency code, or None if not found
     """
     # Look for CURDEF tags in statement response sections
-    for stmt_type in ['STMTRS', 'CCSTMTRS', 'INVSTMTRS']:
-        curdef_elements = tree.xpath(f".//*[contains(local-name(), '{stmt_type}')]/CURDEF")
-        for element in curdef_elements:
-            if element.text and element.text.strip():
-                return element.text.strip()
+    for stmt_type in OFX_STATEMENT_TYPES:
+        for elem in tree.xpath(f".//*[contains(local-name(), '{stmt_type}')]/CURDEF"):
+            if text := (elem.text or "").strip():
+                return text
 
-    # If not found in statement sections, try finding any CURDEF tag
-    curdef_elements = tree.xpath(".//CURDEF")
-    for element in curdef_elements:
-        if element.text and element.text.strip():
-            return element.text.strip()
-
-    return None
+    # Fallback: find any CURDEF tag in the document
+    return next(
+        (elem.text.strip() for elem in tree.xpath(".//CURDEF") if elem.text and elem.text.strip()),
+        None,
+    )
 
 
 class Importer(beangulp.Importer):
@@ -128,11 +135,11 @@ class Importer(beangulp.Importer):
                 # Create raw transaction
                 raw_txn = RawTransaction(
                     date=dtposted,
-                    amount=trnamt if trnamt else "0.00",
+                    amount=trnamt or "0.00",
                     payee=name.strip() if name else None,
-                    memo=memo.strip() if memo else "",
-                    id=fitid if fitid else None,
-                    type=trntype if trntype else None
+                    memo=(memo or "").strip(),
+                    id=fitid,
+                    type=trntype,
                 )
                 
                 result.transactions.append(raw_txn)
@@ -148,7 +155,7 @@ class Importer(beangulp.Importer):
                 print(f"Error parsing QBO file: {traceback.format_exc()}")
             return QboFileData()
 
-    def _determine_currency(self, file_currency: Optional[str]) -> str:
+    def _determine_currency(self, file_currency: str | None) -> str:
         """
         Determine which currency to use for transactions based on priority:
         1. Currency extracted from file (if available)
@@ -169,32 +176,19 @@ class Importer(beangulp.Importer):
         if self.debug:
             print(f"File currency not found, using default: {self.currency}")
 
-        # Default currency should never be None as it defaults to "NOK" in __init__,
-        # but as a safety measure, fallback to "USD" if somehow it is None
-        return self.currency or "NOK"
+        # Default currency should never be None, but use DEFAULT_CURRENCY as fallback
+        return self.currency or DEFAULT_CURRENCY
 
     def identify(self, filepath: str) -> bool:
         """Check if the file is an American Express QBO statement."""
         path = Path(filepath)
-
-        # Check file extension first (quick check)
-        if path.suffix.lower() != ".qbo":
-            return False
-
-        # Check for compatible MIME types
         mime_type = beangulp.mimetypes.guess_type(filepath, strict=False)[0]
-        if mime_type not in {
-            'application/x-ofx',
-            'application/vnd.intu.qbo',
-            'application/vnd.intu.qfx'
-        }:
-            return False
 
-        # Check for Amex-specific filename pattern
-        if path.name.lower().startswith("activity"):
-            return True
-
-        return False
+        return (
+            path.suffix.lower() == ".qbo"
+            and mime_type in VALID_MIME_TYPES
+            and path.name.lower().startswith("activity")
+        )
 
     def account(self, filepath: str) -> str:
         """Return the account name for the file."""
@@ -204,7 +198,7 @@ class Importer(beangulp.Importer):
         """Generate a descriptive filename for the imported data."""
         return f"amex_qbo.{Path(filepath).name}"
 
-    def date(self, filepath: str) -> Optional[datetime.date]:
+    def date(self, filepath: str) -> datetime.date | None:
         """Extract the latest transaction date from the file."""
         parsed_data = self._parse_qbo_file(filepath)
         
@@ -232,7 +226,7 @@ class Importer(beangulp.Importer):
         latest_date = max(t.date for t in parsed_transactions)
         return latest_date
 
-    def finalize(self, txn: data.Transaction, row: Any) -> Optional[data.Transaction]:
+    def finalize(self, txn: data.Transaction, row: Any) -> data.Transaction | None:
         """
         Post-process the transaction with categorization based on narration.
 
@@ -258,7 +252,7 @@ class Importer(beangulp.Importer):
                 return txn._replace(postings=txn.postings + [balancing_posting])
         return txn  # Return unchanged if no patterns match
 
-    def extract(self, filepath: str, existing_entries: List[data.Directive]) -> List[data.Directive]:
+    def extract(self, filepath: str, existing_entries: list[data.Directive]) -> list[data.Directive]:
         """
         Extract transactions from an American Express QBO file.
 
@@ -295,14 +289,13 @@ class Importer(beangulp.Importer):
 
                 txn_date = parse_ofx_time(raw_txn.date).date()
                 amount_str = raw_txn.amount or "0.00"
-                payee = raw_txn.payee # Can be None
-                memo = raw_txn.memo or "" # Ensure memo is a string
+                payee = raw_txn.payee
+                memo = raw_txn.memo or ""
                 txn_id = raw_txn.id
                 txn_type = raw_txn.type
 
-                # 3b. Prepare Beancount data
                 # Use payee as narration, fallback to memo if payee is missing
-                narration = payee if payee else memo
+                narration = payee or memo
                 metadata = data.new_metadata(filepath, idx) # Start with standard metadata
 
                 # Add specific metadata if available
@@ -317,7 +310,7 @@ class Importer(beangulp.Importer):
                 # 3c. Create the primary posting for the credit card account
                 try:
                     # Convert amount string to Decimal
-                    amount_decimal = D(str(amount_str))
+                    amount_decimal = D(amount_str)
                 except Exception as e:
                      if self.debug:
                          print(f"Skipping transaction {idx} in {filepath} due to invalid amount '{amount_str}': {e}")
@@ -364,7 +357,7 @@ class Importer(beangulp.Importer):
         # 4. Add balance assertion if available
         if qbo_data.balance is not None and qbo_data.balance_date:
             try:
-                balance_decimal = D(str(qbo_data.balance))
+                balance_decimal = D(qbo_data.balance)
                 # QBO balance is typically the balance *at the end* of the statement date.
                 # Beancount balance assertion applies at the *start* of the day.
                 # So, we assert the balance for the day *after* the statement balance date.

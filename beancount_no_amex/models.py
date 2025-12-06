@@ -1,58 +1,55 @@
 from datetime import date
 from decimal import Decimal
-from typing import Dict, List, Optional, Set
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class RawTransaction(BaseModel):
     """Raw transaction data extracted from QBO file."""
-    date: Optional[str] = None
-    amount: Optional[str] = None
-    payee: Optional[str] = None
-    memo: Optional[str] = None
-    id: Optional[str] = None
-    type: Optional[str] = None
+    date: str | None = None
+    amount: str | None = None
+    payee: str | None = None
+    memo: str | None = None
+    id: str | None = None
+    type: str | None = None
 
 
 class ParsedTransaction(BaseModel):
     """Processed transaction with proper types."""
     date: date
     amount: Decimal
-    payee: Optional[str] = None
-    memo: Optional[str] = ""
-    id: Optional[str] = None
-    type: Optional[str] = None
+    payee: str | None = None
+    memo: str | None = ""
+    id: str | None = None
+    type: str | None = None
     
-    @validator('amount')
+    @field_validator('amount', mode='before')
+    @classmethod
     def validate_amount(cls, v):
         """Ensure amount is a valid decimal."""
-        if isinstance(v, str):
-            return Decimal(v)
-        return v
+        return Decimal(v) if isinstance(v, str) else v
 
 
 class BeanTransaction(BaseModel):
     """Transaction ready for conversion to Beancount entries."""
+    model_config = {"arbitrary_types_allowed": True}
+
     date: date
     amount: Decimal
     currency: str
-    payee: Optional[str] = None
+    payee: str | None = None
     narration: str = ""
     flag: str = "*"
-    tags: Set[str] = Field(default_factory=set)
-    links: Set[str] = Field(default_factory=set)
+    tags: set[str] = Field(default_factory=set)
+    links: set[str] = Field(default_factory=set)
     account: str = ""
-    metadata: Dict[str, str] = Field(default_factory=dict)
-    matched_account: Optional[str] = None
-    
-    class Config:
-        arbitrary_types_allowed = True
+    metadata: dict[str, str] = Field(default_factory=dict)
+    matched_account: str | None = None
 
 
 class QboFileData(BaseModel):
     """Data extracted from a QBO file."""
-    transactions: List[RawTransaction] = Field(default_factory=list)
-    balance: Optional[str] = None
-    balance_date: Optional[date] = None
-    currency: Optional[str] = None
+    transactions: list[RawTransaction] = Field(default_factory=list)
+    balance: str | None = None
+    balance_date: date | None = None
+    currency: str | None = None
