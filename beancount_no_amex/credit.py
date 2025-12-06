@@ -1,7 +1,7 @@
 import datetime
 import traceback
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any
 from dataclasses import dataclass, field
 
 import beangulp
@@ -21,7 +21,7 @@ class AmexAccountConfig:
     """Configuration for an American Express QBO account."""
     account_name: str
     currency: str
-    narration_to_account_mappings: List[Tuple[str, str]] = field(default_factory=list)
+    narration_to_account_mappings: list[tuple[str, str]] = field(default_factory=list)
 
 
 def parse_ofx_time(date_str: str) -> datetime.datetime:
@@ -37,7 +37,7 @@ def parse_ofx_time(date_str: str) -> datetime.datetime:
     return datetime.datetime.strptime(date_str[:14], '%Y%m%d%H%M%S')
 
 
-def find_currency(tree) -> Optional[str]:
+def find_currency(tree) -> str | None:
     """Find the currency specified in the OFX file.
 
     Args:
@@ -145,7 +145,7 @@ class Importer(beangulp.Importer):
                 print(f"Error parsing QBO file: {traceback.format_exc()}")
             return QboFileData()
 
-    def _determine_currency(self, file_currency: Optional[str]) -> str:
+    def _determine_currency(self, file_currency: str | None) -> str:
         """
         Determine which currency to use for transactions based on priority:
         1. Currency extracted from file (if available)
@@ -189,7 +189,7 @@ class Importer(beangulp.Importer):
         """Generate a descriptive filename for the imported data."""
         return f"amex_qbo.{Path(filepath).name}"
 
-    def date(self, filepath: str) -> Optional[datetime.date]:
+    def date(self, filepath: str) -> datetime.date | None:
         """Extract the latest transaction date from the file."""
         parsed_data = self._parse_qbo_file(filepath)
         
@@ -217,7 +217,7 @@ class Importer(beangulp.Importer):
         latest_date = max(t.date for t in parsed_transactions)
         return latest_date
 
-    def finalize(self, txn: data.Transaction, row: Any) -> Optional[data.Transaction]:
+    def finalize(self, txn: data.Transaction, row: Any) -> data.Transaction | None:
         """
         Post-process the transaction with categorization based on narration.
 
@@ -243,7 +243,7 @@ class Importer(beangulp.Importer):
                 return txn._replace(postings=txn.postings + [balancing_posting])
         return txn  # Return unchanged if no patterns match
 
-    def extract(self, filepath: str, existing_entries: List[data.Directive]) -> List[data.Directive]:
+    def extract(self, filepath: str, existing_entries: list[data.Directive]) -> list[data.Directive]:
         """
         Extract transactions from an American Express QBO file.
 
