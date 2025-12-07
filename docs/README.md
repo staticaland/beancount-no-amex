@@ -4,45 +4,35 @@ This document explains how QBO files from American Express are transformed into 
 
 ## Pipeline Overview
 
+```mermaid
+flowchart TD
+    A[/"**QBO/OFX File**<br/>activity.qbo"/] --> B["**_parse_qbo_file()**<br/>Extract raw data using lxml"]
+    B --> C["**RawTransaction**<br/>All fields as strings"]
+    C --> D["**ParsedTransaction**<br/>Typed Python objects"]
+    D --> E["**BeanTransaction**<br/>+ account, currency, metadata"]
+    E --> F[/"**Beancount Directives**<br/>Transaction + Balance"/]
+
+    subgraph stage1 ["Stage 1: Raw Extraction"]
+        C
+    end
+
+    subgraph stage2 ["Stage 2: Type Conversion"]
+        D
+    end
+
+    subgraph stage3 ["Stage 3: Enrichment"]
+        E
+    end
 ```
-┌─────────────────┐
-│   QBO/OFX File  │  XML file exported from American Express
-│   (activity.qbo)│
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  _parse_qbo_file│  Extracts raw data from XML using lxml
-│                 │  Returns: QboFileData containing RawTransactions
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ RawTransaction  │  All fields as strings (direct from XML)
-│                 │  date: "20250320000000.000[-7:MST]"
-│                 │  amount: "-895.45"
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ParsedTransaction│  Typed Python objects
-│                 │  date: datetime.date(2025, 3, 20)
-│                 │  amount: Decimal("-895.45")
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  BeanTransaction│  Full transaction representation with:
-│                 │  - account, currency, metadata
-│                 │  - matched_account (from categorization)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   Beancount     │  data.Transaction + data.Balance
-│   Directives    │  Ready for bean-check validation
-└─────────────────┘
-```
+
+### Data at Each Stage
+
+| Stage | Model | Example |
+|-------|-------|---------|
+| Raw | `RawTransaction` | `date: "20250320000000.000[-7:MST]"`, `amount: "-895.45"` |
+| Parsed | `ParsedTransaction` | `date: datetime.date(2025, 3, 20)`, `amount: Decimal("-895.45")` |
+| Enriched | `BeanTransaction` | + `currency: "NOK"`, `account: "Liabilities:CreditCard:Amex"` |
+| Final | `data.Transaction` | Beancount directive ready for `bean-check` |
 
 ## Data Models
 
@@ -111,11 +101,18 @@ class QboFileData(BaseModel):
 
 ### Step 1: File Identification (`identify`)
 
-```
-Is it a .qbo file?
-    └── Check MIME type (application/x-ofx, application/vnd.intu.qbo)
-        └── Does filename start with "activity"?
-            └── If account_id configured: does ACCTID match?
+```mermaid
+flowchart TD
+    A{".qbo extension?"} -->|No| R[Reject]
+    A -->|Yes| B{"Valid MIME type?<br/>application/x-ofx<br/>application/vnd.intu.qbo"}
+    B -->|No| R
+    B -->|Yes| C{"Filename starts<br/>with 'activity'?"}
+    C -->|No| R
+    C -->|Yes| D{"account_id<br/>configured?"}
+    D -->|No| ACC[Accept - matches any]
+    D -->|Yes| E{"File ACCTID<br/>matches config?"}
+    E -->|No| R
+    E -->|Yes| ACC2[Accept - specific account]
 ```
 
 ### Step 2: QBO Parsing (`_parse_qbo_file`)
@@ -129,10 +126,13 @@ Extracts from XML:
 
 ### Step 3: Currency Determination (`_determine_currency`)
 
-Priority order:
-1. Currency from QBO file (`<CURDEF>NOK</CURDEF>`)
-2. Currency from config (`AmexAccountConfig.currency`)
-3. Default fallback (`"NOK"`)
+```mermaid
+flowchart LR
+    A{"Currency in<br/>QBO file?"} -->|Yes| B["Use file currency"]
+    A -->|No| C{"Currency in<br/>config?"}
+    C -->|Yes| D["Use config currency"]
+    C -->|No| E["Use default: NOK"]
+```
 
 ### Step 4: Transaction Creation (`extract`)
 
