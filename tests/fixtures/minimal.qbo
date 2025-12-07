@@ -1,0 +1,56 @@
+<?xml version="1.0" standalone="no"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<!--
+    Minimal QBO file for testing.
+
+    This is the simplest valid QBO file that can be processed:
+    - One transaction
+    - One balance assertion
+    - All required elements present
+-->
+<OFX>
+  <SIGNONMSGSRSV1>
+    <SONRS>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <DTSERVER>20250320000000</DTSERVER>
+      <LANGUAGE>ENG</LANGUAGE>
+      <FI>
+        <ORG>AMEX</ORG>
+      </FI>
+    </SONRS>
+  </SIGNONMSGSRSV1>
+  <CREDITCARDMSGSRSV1>
+    <CCSTMTTRNRS>
+      <TRNUID>0</TRNUID>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <CCSTMTRS>
+        <CURDEF>NOK</CURDEF>
+        <CCACCTFROM>
+          <ACCTID>TEST|MINIMAL</ACCTID>
+        </CCACCTFROM>
+        <BANKTRANLIST>
+          <DTSTART>20250320000000</DTSTART>
+          <DTEND>20250320000000</DTEND>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20250320000000</DTPOSTED>
+            <TRNAMT>-100.00</TRNAMT>
+            <FITID>MINIMAL001</FITID>
+            <NAME>TEST MERCHANT</NAME>
+            <MEMO>Test transaction</MEMO>
+          </STMTTRN>
+        </BANKTRANLIST>
+        <LEDGERBAL>
+          <BALAMT>-100.00</BALAMT>
+          <DTASOF>20250320000000</DTASOF>
+        </LEDGERBAL>
+      </CCSTMTRS>
+    </CCSTMTTRNRS>
+  </CREDITCARDMSGSRSV1>
+</OFX>

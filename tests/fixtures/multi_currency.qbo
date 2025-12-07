@@ -1,0 +1,73 @@
+<?xml version="1.0" standalone="no"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<!--
+    Multi-currency QBO file for testing currency handling.
+
+    This file uses USD instead of NOK to test:
+    - Currency detection from CURDEF
+    - Currency priority (file vs config)
+    - Non-NOK transaction handling
+-->
+<OFX>
+  <SIGNONMSGSRSV1>
+    <SONRS>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <DTSERVER>20250320000000</DTSERVER>
+      <LANGUAGE>ENG</LANGUAGE>
+      <FI>
+        <ORG>AMEX</ORG>
+        <FID>1234</FID>
+      </FI>
+    </SONRS>
+  </SIGNONMSGSRSV1>
+  <CREDITCARDMSGSRSV1>
+    <CCSTMTTRNRS>
+      <TRNUID>0</TRNUID>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <CCSTMTRS>
+        <CURDEF>USD</CURDEF>
+        <CCACCTFROM>
+          <ACCTID>USD|CARD</ACCTID>
+        </CCACCTFROM>
+        <BANKTRANLIST>
+          <DTSTART>20250319000000</DTSTART>
+          <DTEND>20250320000000</DTEND>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20250320000000</DTPOSTED>
+            <TRNAMT>-49.99</TRNAMT>
+            <FITID>USD001</FITID>
+            <NAME>AMAZON.COM</NAME>
+            <MEMO>Online purchase</MEMO>
+          </STMTTRN>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20250319000000</DTPOSTED>
+            <TRNAMT>-12.50</TRNAMT>
+            <FITID>USD002</FITID>
+            <NAME>STARBUCKS COFFEE</NAME>
+            <MEMO>Coffee</MEMO>
+          </STMTTRN>
+          <STMTTRN>
+            <TRNTYPE>CREDIT</TRNTYPE>
+            <DTPOSTED>20250319000000</DTPOSTED>
+            <TRNAMT>25.00</TRNAMT>
+            <FITID>USD003</FITID>
+            <NAME>REFUND - MERCHANT</NAME>
+            <MEMO>Return</MEMO>
+          </STMTTRN>
+        </BANKTRANLIST>
+        <LEDGERBAL>
+          <BALAMT>-37.49</BALAMT>
+          <DTASOF>20250320000000</DTASOF>
+        </LEDGERBAL>
+      </CCSTMTRS>
+    </CCSTMTTRNRS>
+  </CREDITCARDMSGSRSV1>
+</OFX>

@@ -11,6 +11,12 @@ dependencies = [
     "pydantic>=2.10.6",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+]
+
 [tool.setuptools.packages.find]
 include = ["beancount_no_amex"]
 
@@ -26,3 +32,10 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 beancount-no-amex = "beancount_no_amex.credit:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v"
