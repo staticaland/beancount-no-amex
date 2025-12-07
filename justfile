@@ -10,8 +10,20 @@ default:
 check:
     ruff check {{path}}
 
-test:
+# Run beangulp integration tests (compares output against .beancount files)
+test-beangulp:
     uv run beancount-no-amex test test_data
+
+# Run pytest unit and component tests
+test:
+    uv run --extra dev pytest tests/ -v
+
+# Run pytest with coverage report
+test-cov:
+    uv run --extra dev pytest tests/ -v --cov=beancount_no_amex --cov-report=term-missing
+
+# Run all tests (pytest + beangulp)
+test-all: test test-beangulp
 
 # Format all files in the specified directory (and any subdirectories)
 format:

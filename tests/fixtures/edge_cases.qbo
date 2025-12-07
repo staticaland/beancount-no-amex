@@ -1,0 +1,117 @@
+<?xml version="1.0" standalone="no"?>
+<?OFX OFXHEADER="200" VERSION="202" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<!--
+    Edge case QBO file for testing robustness.
+
+    Contains various edge cases:
+    - Transaction with missing payee (uses memo as narration)
+    - Transaction with missing memo
+    - Zero amount transaction
+    - Transaction with very long payee name
+    - Transaction with special characters
+    - Very small and very large amounts
+-->
+<OFX>
+  <SIGNONMSGSRSV1>
+    <SONRS>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <DTSERVER>20250320000000</DTSERVER>
+      <LANGUAGE>ENG</LANGUAGE>
+      <FI>
+        <ORG>AMEX</ORG>
+      </FI>
+    </SONRS>
+  </SIGNONMSGSRSV1>
+  <CREDITCARDMSGSRSV1>
+    <CCSTMTTRNRS>
+      <TRNUID>0</TRNUID>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <CCSTMTRS>
+        <CURDEF>NOK</CURDEF>
+        <CCACCTFROM>
+          <ACCTID>EDGE|CASES</ACCTID>
+        </CCACCTFROM>
+        <BANKTRANLIST>
+          <DTSTART>20250315000000</DTSTART>
+          <DTEND>20250320000000</DTEND>
+
+          <!-- Missing payee - should use memo as narration -->
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20250320</DTPOSTED>
+            <TRNAMT>-50.00</TRNAMT>
+            <FITID>EDGE001</FITID>
+            <MEMO>Fallback memo as narration</MEMO>
+          </STMTTRN>
+
+          <!-- Missing memo - should work fine -->
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20250319</DTPOSTED>
+            <TRNAMT>-75.00</TRNAMT>
+            <FITID>EDGE002</FITID>
+            <NAME>NO MEMO MERCHANT</NAME>
+          </STMTTRN>
+
+          <!-- Very long payee name -->
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20250318</DTPOSTED>
+            <TRNAMT>-25.00</TRNAMT>
+            <FITID>EDGE003</FITID>
+            <NAME>THIS IS A VERY LONG MERCHANT NAME THAT MIGHT CAUSE DISPLAY ISSUES IN SOME APPLICATIONS ABCDEFGHIJKLMNOPQRSTUVWXYZ</NAME>
+            <MEMO>Long name test</MEMO>
+          </STMTTRN>
+
+          <!-- Special characters in payee -->
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20250317</DTPOSTED>
+            <TRNAMT>-30.00</TRNAMT>
+            <FITID>EDGE004</FITID>
+            <NAME>CAFE &amp; BAR - OSLO</NAME>
+            <MEMO>Special chars test</MEMO>
+          </STMTTRN>
+
+          <!-- Very small amount -->
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20250316</DTPOSTED>
+            <TRNAMT>-0.01</TRNAMT>
+            <FITID>EDGE005</FITID>
+            <NAME>TINY TRANSACTION</NAME>
+          </STMTTRN>
+
+          <!-- Large amount -->
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20250315</DTPOSTED>
+            <TRNAMT>-99999.99</TRNAMT>
+            <FITID>EDGE006</FITID>
+            <NAME>BIG PURCHASE</NAME>
+          </STMTTRN>
+
+          <!-- Credit with odd decimal -->
+          <STMTTRN>
+            <TRNTYPE>CREDIT</TRNTYPE>
+            <DTPOSTED>20250315</DTPOSTED>
+            <TRNAMT>123.456</TRNAMT>
+            <FITID>EDGE007</FITID>
+            <NAME>REFUND WITH THREE DECIMALS</NAME>
+          </STMTTRN>
+
+        </BANKTRANLIST>
+        <LEDGERBAL>
+          <BALAMT>-100030.54</BALAMT>
+          <DTASOF>20250320000000</DTASOF>
+        </LEDGERBAL>
+      </CCSTMTRS>
+    </CCSTMTTRNRS>
+  </CREDITCARDMSGSRSV1>
+</OFX>
