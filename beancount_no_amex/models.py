@@ -53,3 +53,5 @@ class QboFileData(BaseModel):
     balance: str | None = None
     balance_date: date | None = None
     currency: str | None = None
+    account_id: str | None = None
+    organization: str | None = None

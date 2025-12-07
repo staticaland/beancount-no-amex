@@ -5,6 +5,7 @@ from typing import Any
 from dataclasses import dataclass, field
 
 import beangulp
+from beangulp import Ingest
 from beangulp.testing import main as test_main
 from beancount.core import data
 from beancount.core.amount import Amount
@@ -28,9 +29,19 @@ VALID_MIME_TYPES = frozenset({
 
 @dataclass
 class AmexAccountConfig:
-    """Configuration for an American Express QBO account."""
+    """Configuration for an American Express QBO account.
+
+    Attributes:
+        account_name: The Beancount account name (e.g., 'Liabilities:CreditCard:Amex:Personal')
+        currency: Default currency for transactions (e.g., 'NOK')
+        account_id: Optional QBO account ID for matching specific cards (e.g., 'XYZ|98765').
+                    When set, the importer will only match files with this exact ACCTID.
+                    When None, the importer matches any Amex QBO file.
+        narration_to_account_mappings: List of (pattern, account) tuples for auto-categorization.
+    """
     account_name: str
     currency: str
+    account_id: str | None = None
     narration_to_account_mappings: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -45,6 +56,31 @@ def parse_ofx_time(date_str: str) -> datetime.datetime:
     if len(date_str) < 14:
         return datetime.datetime.strptime(date_str[:8], OFX_DATE_FORMAT)
     return datetime.datetime.strptime(date_str[:14], OFX_DATETIME_FORMAT)
+
+
+def find_account_id(filepath: str) -> str | None:
+    """Quickly extract the account ID from a QBO file without full parsing.
+
+    Args:
+        filepath: Path to the QBO file
+    Returns:
+        The account ID string, or None if not found
+    """
+    try:
+        parser = etree.XMLParser(recover=True)
+        with open(filepath, "rb") as f:
+            tree = etree.parse(f, parser)
+
+        acct_from = tree.find(".//CCACCTFROM")
+        if acct_from is None:
+            acct_from = tree.find(".//BANKACCTFROM")
+        if acct_from is not None:
+            acct_id = acct_from.findtext("ACCTID")
+            if acct_id:
+                return acct_id.strip()
+    except Exception:
+        pass
+    return None
 
 
 def find_currency(tree) -> str | None:
@@ -88,6 +124,7 @@ class Importer(beangulp.Importer):
         # Store configuration values from the config object
         self.account_name = config.account_name
         self.currency = config.currency  # Store configured currency
+        self.account_id = config.account_id  # Optional account ID for matching
         self.narration_to_account_mappings = config.narration_to_account_mappings
         self.flag = flag
         self.debug = debug
@@ -100,6 +137,22 @@ class Importer(beangulp.Importer):
             parser = etree.XMLParser(recover=True)
             with open(filepath, "rb") as f:
                 tree = etree.parse(f, parser)
+
+            # Extract account ID from CCACCTFROM or BANKACCTFROM
+            acct_from = tree.find(".//CCACCTFROM")
+            if acct_from is None:
+                acct_from = tree.find(".//BANKACCTFROM")
+            if acct_from is not None:
+                acct_id = acct_from.findtext("ACCTID")
+                if acct_id:
+                    result.account_id = acct_id.strip()
+
+            # Extract organization info (e.g., "AMEX")
+            fi_elem = tree.find(".//FI")
+            if fi_elem is not None:
+                org = fi_elem.findtext("ORG")
+                if org:
+                    result.organization = org.strip()
 
             # Extract currency information
             result.currency = find_currency(tree)
@@ -180,23 +233,48 @@ class Importer(beangulp.Importer):
         return self.currency or DEFAULT_CURRENCY
 
     def identify(self, filepath: str) -> bool:
-        """Check if the file is an American Express QBO statement."""
+        """Check if the file is an American Express QBO statement.
+
+        When account_id is configured, also verifies that the file's ACCTID matches.
+        This enables multiple importers to handle different Amex accounts.
+        """
         path = Path(filepath)
         mime_type = beangulp.mimetypes.guess_type(filepath, strict=False)[0]
 
-        return (
+        # Basic file type validation
+        is_qbo_file = (
             path.suffix.lower() == ".qbo"
             and mime_type in VALID_MIME_TYPES
             and path.name.lower().startswith("activity")
         )
+
+        if not is_qbo_file:
+            return False
+
+        # If no account_id configured, match any Amex QBO file
+        if self.account_id is None:
+            return True
+
+        # Match specific account ID
+        file_account_id = find_account_id(filepath)
+        return file_account_id == self.account_id
 
     def account(self, filepath: str) -> str:
         """Return the account name for the file."""
         return self.account_name
 
     def filename(self, filepath: str) -> str:
-        """Generate a descriptive filename for the imported data."""
-        return f"amex_qbo.{Path(filepath).name}"
+        """Generate a descriptive filename for the imported data.
+
+        When account_id is configured, includes the account suffix for disambiguation.
+        E.g., 'amex_qbo.Personal.activity.qbo' for 'Liabilities:CreditCard:Amex:Personal'
+        """
+        base_name = Path(filepath).name
+        if self.account_id:
+            # Use last component of account name for disambiguation
+            account_suffix = self.account_name.split(":")[-1]
+            return f"amex_qbo.{account_suffix}.{base_name}"
+        return f"amex_qbo.{base_name}"
 
     def date(self, filepath: str) -> datetime.date | None:
         """Extract the latest transaction date from the file."""
@@ -389,22 +467,83 @@ class Importer(beangulp.Importer):
 
         return entries
 
-def main():
-    """Entry point for the command-line interface."""
-    # This enables the testing CLI commands
-    test_main(Importer(
-        AmexAccountConfig(
+def get_importers() -> list[beangulp.Importer]:
+    """Create and return a list of configured importers.
+
+    This function demonstrates how to configure multiple Amex account importers.
+    Each importer can be configured with:
+    - A unique account_id to match specific QBO files
+    - Different account names for different cards
+    - Separate categorization rules per account
+
+    Example with multiple accounts:
+        return [
+            Importer(AmexAccountConfig(
+                account_name='Liabilities:CreditCard:Amex:Personal',
+                currency='NOK',
+                account_id='XYZ|12345',  # Personal card account ID
+                narration_to_account_mappings=[
+                    ('VINMONOPOLET', 'Expenses:Groceries'),
+                    ('SPOTIFY', 'Expenses:Entertainment:Music'),
+                ],
+            )),
+            Importer(AmexAccountConfig(
+                account_name='Liabilities:CreditCard:Amex:Business',
+                currency='NOK',
+                account_id='XYZ|67890',  # Business card account ID
+                narration_to_account_mappings=[
+                    ('GITHUB', 'Expenses:Business:Software'),
+                    ('AWS', 'Expenses:Business:Cloud'),
+                ],
+            )),
+        ]
+    """
+    # Default configuration - single importer without account_id filtering
+    # Matches any Amex QBO file
+    return [
+        Importer(AmexAccountConfig(
             account_name='Liabilities:CreditCard:Amex',
             currency='NOK',
+            # account_id='XYZ|98765',  # Uncomment and set to match specific card
             narration_to_account_mappings=[
                 ('GITHUB', 'Expenses:Cloud-Services:Source-Hosting:Github'),
                 ('Fedex', 'Expenses:Postage:FedEx'),
                 ('FREMTIND', 'Expenses:Insurance'),
                 ('Meny Alna Oslo', 'Expenses:Groceries'),
                 ('VINMONOPOLET', 'Expenses:Groceries'),
-            ]
-        )
-    ))
+            ],
+        )),
+    ]
+
+
+def main():
+    """Entry point for the command-line interface.
+
+    Uses beangulp.Ingest for full importer workflow support:
+    - identify: Check which files match which importers
+    - extract: Extract transactions to beancount format
+    - file: Organize source documents (when implemented)
+    - archive: Move processed files (when implemented)
+
+    For testing, run: beancount-no-amex test test_data/
+    """
+    importers = get_importers()
+
+    # Use Ingest for full beangulp workflow (supports multiple importers)
+    ingest = Ingest(importers)
+    ingest.main()
+
+
+def test_main_single():
+    """Alternative entry point for single-importer testing.
+
+    This uses beangulp's testing.main which is simpler but only supports
+    a single importer. Useful for development and basic testing.
+    """
+    importers = get_importers()
+    if importers:
+        test_main(importers[0])
+
 
 if __name__ == '__main__':
     main()
