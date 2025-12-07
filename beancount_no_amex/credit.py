@@ -18,6 +18,10 @@ from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFile
 DEFAULT_CURRENCY = "NOK"
 OFX_DATE_FORMAT = "%Y%m%d"
 OFX_DATETIME_FORMAT = "%Y%m%d%H%M%S"
+# OFX statement response types:
+# STMTRS - Statement Response (bank accounts)
+# CCSTMTRS - Credit Card Statement Response
+# INVSTMTRS - Investment Statement Response
 OFX_STATEMENT_TYPES = ("STMTRS", "CCSTMTRS", "INVSTMTRS")
 VALID_MIME_TYPES = frozenset({
     "application/x-ofx",
