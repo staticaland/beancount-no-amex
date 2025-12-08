@@ -1,0 +1,359 @@
+#+TITLE: Personal Finance with Beancount
+#+AUTHOR: Your Name
+#+DATE: 2024
+#+PROPERTY: header-args :dir /home/user/beancount-no-amex/examples/literate
+#+PROPERTY: header-args:beancount :cmdline 2024.beancount
+#+STARTUP: showall
+
+* Introduction
+
+This is a literate programming approach to personal finance using [[https://beancount.github.io/][Beancount]].
+By combining documentation with executable code blocks, we create a living
+document that both explains our financial tracking system and allows us to
+run queries and generate reports directly from Emacs.
+
+** Why Literate Programming for Finance?
+
+- *Documentation*: Keep notes about financial decisions alongside the data
+- *Reproducibility*: Queries can be re-run at any time
+- *Organization*: Group related analyses together
+- *Learning*: Understand patterns in your spending over time
+
+** File Structure
+
+Our ledger is organized into separate files:
+
+| File                 | Purpose                              |
+|----------------------+--------------------------------------|
+| =accounts.beancount= | Chart of accounts (account openings) |
+| =2024.beancount=     | All transactions for 2024            |
+
+* Setup and Validation
+
+Before diving into analysis, let's verify our ledger is valid.
+
+** Check for Errors
+
+Run =bean-check= to validate the ledger:
+
+#+begin_src shell :results output :exports both
+bean-check 2024.beancount
+#+end_src
+
+If there's no output, the ledger is valid. Any errors would be displayed here.
+
+** View Statistics
+
+Get an overview of our ledger with =bean-count=:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "SELECT count(*) as num_transactions"
+#+end_src
+
+* Account Balances
+
+** Current Balances
+
+View the current balance of all accounts:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT account, sum(position) as balance
+WHERE account ~ 'Assets' OR account ~ 'Liabilities'
+GROUP BY account
+ORDER BY account
+"
+#+end_src
+
+** Net Worth Calculation
+
+Calculate total net worth (assets minus liabilities):
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT sum(convert(position, 'NOK')) as net_worth
+WHERE account ~ 'Assets' OR account ~ 'Liabilities'
+"
+#+end_src
+
+* Expense Analysis
+
+** Total Expenses by Category
+
+See where the money is going:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT root(account, 3) as category,
+       sum(position) as total
+WHERE account ~ 'Expenses'
+GROUP BY 1
+ORDER BY 2 DESC
+"
+#+end_src
+
+** Monthly Expense Breakdown
+
+Track spending patterns over time:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT year, month, sum(position) as expenses
+WHERE account ~ 'Expenses'
+GROUP BY year, month
+ORDER BY year, month
+"
+#+end_src
+
+** Food Expenses Deep Dive
+
+Let's look specifically at food-related expenses:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT account, sum(position) as total
+WHERE account ~ 'Expenses:Food'
+GROUP BY account
+ORDER BY 2 DESC
+"
+#+end_src
+
+* Subscription Tracking
+
+** Entertainment Subscriptions
+
+Track recurring entertainment costs:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT date, narration, position
+WHERE account ~ 'Expenses:Entertainment'
+ORDER BY date
+"
+#+end_src
+
+** Spotify History
+
+Filter transactions by metadata or narration:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT date, narration, position
+WHERE narration ~ 'Spotify'
+ORDER BY date
+"
+#+end_src
+
+* Credit Card Analysis
+
+** Credit Card Transactions
+
+View all credit card activity:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT date, narration, position
+WHERE account = 'Liabilities:CreditCard:Amex' AND position < 0 NOK
+ORDER BY date
+LIMIT 15
+"
+#+end_src
+
+** Credit Card Payments
+
+Track payments made to credit card:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT date, narration, position
+WHERE account = 'Liabilities:CreditCard:Amex' AND position > 0 NOK
+ORDER BY date
+"
+#+end_src
+
+** Credit Card Balance Over Time
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT date, balance
+FROM OPEN ON 2024-01-01
+    CLOSE ON 2024-04-01
+    CLEAR
+WHERE account = 'Liabilities:CreditCard:Amex'
+"
+#+end_src
+
+* Income Analysis
+
+** Income Sources
+
+View all income:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT account, sum(position) as total
+WHERE account ~ 'Income'
+GROUP BY account
+ORDER BY 2
+"
+#+end_src
+
+Note: Income appears as negative numbers in Beancount (credits).
+
+** Monthly Income
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT year, month, sum(position) as income
+WHERE account ~ 'Income'
+GROUP BY year, month
+ORDER BY year, month
+"
+#+end_src
+
+* Cash Flow Analysis
+
+** Monthly Cash Flow
+
+Calculate income minus expenses per month:
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT year, month,
+       sum(position) as net_flow
+WHERE account ~ 'Income' OR account ~ 'Expenses'
+GROUP BY year, month
+ORDER BY year, month
+"
+#+end_src
+
+Positive values indicate spending exceeded income (typical when viewing
+as Income is negative/credit).
+
+* Import Integration
+
+This section demonstrates how to integrate with the =beancount-no-amex= importer.
+
+** Understanding QBO Imports
+
+The importer converts American Express QBO files to Beancount format.
+Here's an example of the pipeline:
+
+#+begin_src python :results output :exports code :eval no
+from beancount_no_amex.credit import Importer
+from beancount_no_amex.models import AmexAccountConfig
+
+# Configure the importer
+config = AmexAccountConfig(
+    account_name='Liabilities:CreditCard:Amex',
+    currency='NOK',
+    narration_to_account_mappings=[
+        ('SPOTIFY', 'Expenses:Entertainment:Music'),
+        ('NETFLIX', 'Expenses:Entertainment:Streaming'),
+        ('VINMONOPOLET', 'Expenses:Food:Groceries'),
+        ('REMA', 'Expenses:Food:Groceries'),
+        ('KIWI', 'Expenses:Food:Groceries'),
+    ],
+)
+
+importer = Importer(config)
+#+end_src
+
+** Running the Importer
+
+To import a QBO file:
+
+#+begin_src shell :results output :exports code :eval no
+# Import new transactions from a QBO file
+beangulp-extract --existing 2024.beancount config.py path/to/activity.qbo
+
+# Or use the built-in entry point
+beancount-no-amex activity.qbo
+#+end_src
+
+* Report Generation
+
+** Generate Full Balance Sheet
+
+#+begin_src shell :results output :exports both
+bean-report 2024.beancount balsheet 2>/dev/null | head -40
+#+end_src
+
+** Income Statement
+
+#+begin_src shell :results output :exports both
+bean-report 2024.beancount income 2>/dev/null | head -40
+#+end_src
+
+* Tips and Tricks
+
+** Useful Bean-Query Patterns
+
+*** Filter by Date Range
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT date, narration, position
+WHERE account ~ 'Expenses'
+  AND date >= 2024-02-01
+  AND date < 2024-03-01
+ORDER BY position DESC
+LIMIT 5
+"
+#+end_src
+
+*** Find Large Transactions
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT date, payee, narration, position
+WHERE account ~ 'Expenses' AND position > 1000 NOK
+ORDER BY position DESC
+"
+#+end_src
+
+*** Search by Payee
+
+#+begin_src shell :results output :exports both
+bean-query 2024.beancount "
+SELECT date, payee, narration, account, position
+WHERE payee ~ 'Employer'
+ORDER BY date
+"
+#+end_src
+
+** Emacs Configuration
+
+Add this to your Emacs config for better Beancount support:
+
+#+begin_src emacs-lisp :eval no
+;; Enable beancount-mode
+(use-package beancount
+  :mode ("\\.beancount\\'" . beancount-mode)
+  :config
+  (setq beancount-number-alignment-column 52))
+
+;; For org-mode babel support
+(org-babel-do-load-languages
+ 'org-babel-load-languages
+ '((shell . t)
+   (python . t)))
+#+end_src
+
+* Conclusion
+
+This literate approach to personal finance allows you to:
+
+1. Keep financial documentation alongside executable queries
+2. Run analyses directly from Emacs with =C-c C-c=
+3. Export reports to HTML/PDF for sharing
+4. Track changes with version control (Git)
+
+The combination of Beancount's powerful query language and Org-mode's
+literate programming capabilities creates an excellent system for
+understanding and managing personal finances.
+
+* Local Variables                                           :noexport:
+# Local Variables:
+# org-confirm-babel-evaluate: nil
+# End:

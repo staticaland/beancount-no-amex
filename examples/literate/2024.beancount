@@ -1,0 +1,158 @@
+; -*- mode: beancount -*-
+; Transactions for 2024
+; This file contains all transactions for the year
+
+include "accounts.beancount"
+
+; ============================================================================
+; Opening Balances
+; ============================================================================
+
+2024-01-01 * "Opening Balance" "Starting balances for 2024"
+  Assets:Bank:Checking              50000.00 NOK
+  Assets:Bank:Savings              100000.00 NOK
+  Liabilities:CreditCard:Amex       -5000.00 NOK
+  Equity:Opening-Balances
+
+; ============================================================================
+; January 2024
+; ============================================================================
+
+2024-01-05 * "Employer AS" "Monthly salary"
+  Assets:Bank:Checking              45000.00 NOK
+  Income:Salary
+
+2024-01-07 * "REMA 1000" "Weekly groceries"
+  Expenses:Food:Groceries             892.50 NOK
+  Liabilities:CreditCard:Amex
+
+2024-01-10 * "Spotify AB" "Music subscription"
+  id: "SPOTIFY-2024-01"
+  Expenses:Entertainment:Music        119.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-01-12 * "Netflix" "Streaming subscription"
+  Expenses:Entertainment:Streaming    169.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-01-15 * "Vinmonopolet" "Wine for dinner party"
+  Expenses:Food:Groceries             450.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-01-18 * "Ruter AS" "Monthly transit pass"
+  Expenses:Transport:Public           850.00 NOK
+  Assets:Bank:Checking
+
+2024-01-20 * "Kaffebrenneriet" "Coffee meeting"
+  Expenses:Food:Coffee                 89.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-01-25 * "IKEA" "Home accessories"
+  Expenses:Shopping:Electronics       1299.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-01-28 * "Apotek 1" "Medicine"
+  Expenses:Health:Pharmacy            245.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-01-31 * "Credit Card Payment" "Pay off credit card"
+  Liabilities:CreditCard:Amex        3000.00 NOK
+  Assets:Bank:Checking
+
+; ============================================================================
+; February 2024
+; ============================================================================
+
+2024-02-05 * "Employer AS" "Monthly salary"
+  Assets:Bank:Checking              45000.00 NOK
+  Income:Salary
+
+2024-02-06 * "Transfer to Savings" "Monthly savings"
+  Assets:Bank:Savings               10000.00 NOK
+  Assets:Bank:Checking
+
+2024-02-08 * "KIWI" "Weekly groceries"
+  Expenses:Food:Groceries             756.30 NOK
+  Liabilities:CreditCard:Amex
+
+2024-02-10 * "Spotify AB" "Music subscription"
+  id: "SPOTIFY-2024-02"
+  Expenses:Entertainment:Music        119.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-02-12 * "Netflix" "Streaming subscription"
+  Expenses:Entertainment:Streaming    169.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-02-14 * "Restaurant Fjord" "Valentine's dinner"
+  Expenses:Food:Restaurants          1850.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-02-16 * "Circle K" "Fuel"
+  Expenses:Transport:Fuel             890.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-02-20 * "Steam" "Video game purchase"
+  Expenses:Entertainment:Games        399.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-02-22 * "H&M" "Winter clothing"
+  Expenses:Shopping:Clothing         1299.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-02-28 * "Credit Card Payment" "Pay off credit card"
+  Liabilities:CreditCard:Amex        4000.00 NOK
+  Assets:Bank:Checking
+
+; ============================================================================
+; March 2024
+; ============================================================================
+
+2024-03-05 * "Employer AS" "Monthly salary"
+  Assets:Bank:Checking              45000.00 NOK
+  Income:Salary
+
+2024-03-07 * "Coop Mega" "Weekly groceries"
+  Expenses:Food:Groceries             934.80 NOK
+  Liabilities:CreditCard:Amex
+
+2024-03-10 * "Spotify AB" "Music subscription"
+  id: "SPOTIFY-2024-03"
+  Expenses:Entertainment:Music        119.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-03-12 * "Disney Plus" "Streaming subscription"
+  Expenses:Entertainment:Streaming    109.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-03-15 * "Meny" "Groceries for Easter"
+  Expenses:Food:Groceries            1245.60 NOK
+  Liabilities:CreditCard:Amex
+
+2024-03-18 * "Ruter AS" "Monthly transit pass"
+  Expenses:Transport:Public           850.00 NOK
+  Assets:Bank:Checking
+
+2024-03-20 * "Elkjop" "New headphones"
+  Expenses:Shopping:Electronics      1599.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-03-22 * "Tim Wendelboe" "Specialty coffee beans"
+  Expenses:Food:Coffee                385.00 NOK
+  Liabilities:CreditCard:Amex
+
+2024-03-25 * "Dividend" "Q1 dividend payment"
+  Assets:Bank:Checking               2500.00 NOK
+  Income:Dividends
+
+2024-03-31 * "Credit Card Payment" "Pay off credit card"
+  Liabilities:CreditCard:Amex        5000.00 NOK
+  Assets:Bank:Checking
+
+; ============================================================================
+; Balance Assertions
+; ============================================================================
+
+2024-04-01 balance Assets:Bank:Checking        163800.00 NOK
+2024-04-01 balance Assets:Bank:Savings         110000.00 NOK
+2024-04-01 balance Liabilities:CreditCard:Amex  -6138.20 NOK

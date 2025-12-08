@@ -1,0 +1,53 @@
+; -*- mode: beancount -*-
+; Account definitions for the literate beancount example
+; This file defines the chart of accounts used throughout the ledger
+
+option "title" "Personal Finance - Literate Example"
+option "operating_currency" "NOK"
+
+; ============================================================================
+; Asset Accounts
+; ============================================================================
+
+2024-01-01 open Assets:Bank:Checking               NOK
+2024-01-01 open Assets:Bank:Savings                NOK
+2024-01-01 open Assets:Investments:Stocks          NOK
+
+; ============================================================================
+; Liability Accounts
+; ============================================================================
+
+2024-01-01 open Liabilities:CreditCard:Amex        NOK
+
+; ============================================================================
+; Income Accounts
+; ============================================================================
+
+2024-01-01 open Income:Salary                      NOK
+2024-01-01 open Income:Dividends                   NOK
+2024-01-01 open Income:Interest                    NOK
+
+; ============================================================================
+; Expense Accounts
+; ============================================================================
+
+2024-01-01 open Expenses:Food:Groceries            NOK
+2024-01-01 open Expenses:Food:Restaurants          NOK
+2024-01-01 open Expenses:Food:Coffee               NOK
+2024-01-01 open Expenses:Transport:Public          NOK
+2024-01-01 open Expenses:Transport:Fuel            NOK
+2024-01-01 open Expenses:Housing:Rent              NOK
+2024-01-01 open Expenses:Housing:Utilities         NOK
+2024-01-01 open Expenses:Entertainment:Music       NOK
+2024-01-01 open Expenses:Entertainment:Streaming   NOK
+2024-01-01 open Expenses:Entertainment:Games       NOK
+2024-01-01 open Expenses:Shopping:Clothing         NOK
+2024-01-01 open Expenses:Shopping:Electronics      NOK
+2024-01-01 open Expenses:Health:Pharmacy           NOK
+2024-01-01 open Expenses:Misc                      NOK
+
+; ============================================================================
+; Equity Accounts
+; ============================================================================
+
+2024-01-01 open Equity:Opening-Balances            NOK
