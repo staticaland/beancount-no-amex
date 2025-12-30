@@ -34,12 +34,19 @@ class TestExtractBasics:
         transactions = [e for e in entries if isinstance(e, data.Transaction)]
         assert len(transactions) >= 1
 
-    def test_extract_creates_balance_directive(self, basic_importer, minimal_qbo_file):
-        """Balance assertion is created from LEDGERBAL."""
-        entries = basic_importer.extract(str(minimal_qbo_file), [])
+    def test_extract_creates_balance_directive(self, importer_with_balance_assertions, minimal_qbo_file):
+        """Balance assertion is created from LEDGERBAL when enabled."""
+        entries = importer_with_balance_assertions.extract(str(minimal_qbo_file), [])
 
         balances = [e for e in entries if isinstance(e, data.Balance)]
         assert len(balances) == 1
+
+    def test_extract_no_balance_by_default(self, basic_importer, minimal_qbo_file):
+        """Balance assertions are not created by default."""
+        entries = basic_importer.extract(str(minimal_qbo_file), [])
+
+        balances = [e for e in entries if isinstance(e, data.Balance)]
+        assert len(balances) == 0
 
     def test_transaction_has_correct_date(self, basic_importer, minimal_qbo_file):
         """Transaction date is correctly parsed from DTPOSTED."""
@@ -142,13 +149,13 @@ class TestExtractMetadata:
 
 
 class TestExtractBalanceAssertion:
-    """Tests for balance assertion generation."""
+    """Tests for balance assertion generation (requires generate_balance_assertions=True)."""
 
     def test_balance_date_is_day_after_statement(
-        self, basic_importer, minimal_qbo_file
+        self, importer_with_balance_assertions, minimal_qbo_file
     ):
         """Balance assertion is for the day after the statement date."""
-        entries = basic_importer.extract(str(minimal_qbo_file), [])
+        entries = importer_with_balance_assertions.extract(str(minimal_qbo_file), [])
 
         balances = [e for e in entries if isinstance(e, data.Balance)]
         assert len(balances) == 1
@@ -156,16 +163,16 @@ class TestExtractBalanceAssertion:
         # Statement date is 2025-03-20, assertion should be 2025-03-21
         assert balances[0].date == datetime.date(2025, 3, 21)
 
-    def test_balance_amount_from_ledgerbal(self, basic_importer, minimal_qbo_file):
+    def test_balance_amount_from_ledgerbal(self, importer_with_balance_assertions, minimal_qbo_file):
         """Balance amount comes from LEDGERBAL/BALAMT."""
-        entries = basic_importer.extract(str(minimal_qbo_file), [])
+        entries = importer_with_balance_assertions.extract(str(minimal_qbo_file), [])
 
         balances = [e for e in entries if isinstance(e, data.Balance)]
         assert balances[0].amount.number == D("-100.00")
 
-    def test_balance_uses_correct_account(self, basic_importer, minimal_qbo_file):
+    def test_balance_uses_correct_account(self, importer_with_balance_assertions, minimal_qbo_file):
         """Balance assertion uses the configured account."""
-        entries = basic_importer.extract(str(minimal_qbo_file), [])
+        entries = importer_with_balance_assertions.extract(str(minimal_qbo_file), [])
 
         balances = [e for e in entries if isinstance(e, data.Balance)]
         assert balances[0].account == "Liabilities:CreditCard:Amex"
@@ -209,12 +216,12 @@ class TestExtractFromRealFile:
         for txn in credits:
             assert txn.postings[0].units.number > 0
 
-    def test_balance_assertion_matches_file(self, basic_importer, sample_qbo_path):
+    def test_balance_assertion_matches_file(self, importer_with_balance_assertions, sample_qbo_path):
         """Balance assertion matches the LEDGERBAL from the file."""
         if not sample_qbo_path.exists():
             pytest.skip("Sample QBO file not available")
 
-        entries = basic_importer.extract(str(sample_qbo_path), [])
+        entries = importer_with_balance_assertions.extract(str(sample_qbo_path), [])
         balances = [e for e in entries if isinstance(e, data.Balance)]
 
         assert len(balances) == 1
@@ -234,8 +241,8 @@ class TestExtractEdgeCases:
         entries = basic_importer.extract(str(empty_file), [])
         assert entries == []
 
-    def test_file_without_transactions(self, basic_importer, tmp_path):
-        """QBO file with no transactions returns only balance (if present)."""
+    def test_file_without_transactions(self, importer_with_balance_assertions, tmp_path):
+        """QBO file with no transactions returns only balance (when enabled)."""
         qbo_file = tmp_path / "activity.qbo"
         qbo_file.write_text('''<?xml version="1.0"?>
 <OFX>
@@ -251,7 +258,7 @@ class TestExtractEdgeCases:
   </CREDITCARDMSGSRSV1>
 </OFX>''')
 
-        entries = basic_importer.extract(str(qbo_file), [])
+        entries = importer_with_balance_assertions.extract(str(qbo_file), [])
 
         # Should have only the balance assertion
         transactions = [e for e in entries if isinstance(e, data.Transaction)]

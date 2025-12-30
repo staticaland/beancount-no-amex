@@ -47,6 +47,9 @@ class AmexAccountConfig:
                     Supports substring matching, regex, case-insensitive, and amount conditions.
         skip_deduplication: When True, skip FITID-based deduplication (default: False).
                            Useful for forcing re-import of transactions.
+        generate_balance_assertions: When True, generate balance assertions from QBO
+                           balance data (default: False). Enable this if you want the
+                           importer to add balance assertions at the end of each statement.
 
     Example:
         from beancount_no_amex import AmexAccountConfig, TransactionPattern, amount
@@ -86,6 +89,7 @@ class AmexAccountConfig:
     account_id: str | None = None
     transaction_patterns: list[TransactionPattern] = field(default_factory=list)
     skip_deduplication: bool = False
+    generate_balance_assertions: bool = False
 
 
 def parse_ofx_time(date_str: str) -> datetime.datetime:
@@ -170,6 +174,7 @@ class Importer(beangulp.Importer):
         self.account_id = config.account_id  # Optional account ID for matching
         self.transaction_patterns = config.transaction_patterns
         self.skip_deduplication = config.skip_deduplication
+        self.generate_balance_assertions = config.generate_balance_assertions
         self.flag = flag
         self.debug = debug
 
@@ -420,14 +425,17 @@ class Importer(beangulp.Importer):
         Transactions with FITIDs that already exist in the ledger are skipped.
         This can be disabled by setting skip_deduplication=True in the config.
 
+        Balance assertions are only generated if generate_balance_assertions=True
+        in the config (disabled by default).
+
         Args:
             filepath: Path to the QBO file
             existing_entries: Existing directives from the ledger, used for
                              FITID-based deduplication.
 
         Returns:
-            List of extracted Beancount directives (Transactions and Balance),
-            excluding any duplicates found in existing_entries.
+            List of extracted Beancount directives (Transactions, and optionally
+            Balance assertions), excluding any duplicates found in existing_entries.
         """
         entries = []
 
@@ -532,8 +540,8 @@ class Importer(beangulp.Importer):
                      print(f"Unexpected error processing transaction {idx} in {filepath}: {e}\n{traceback.format_exc()}")
                  continue # Skip to next transaction
 
-        # 4. Add balance assertion if available
-        if qbo_data.balance is not None and qbo_data.balance_date:
+        # 4. Add balance assertion if enabled and available
+        if self.generate_balance_assertions and qbo_data.balance is not None and qbo_data.balance_date:
             try:
                 balance_decimal = D(qbo_data.balance)
                 # QBO balance is typically the balance *at the end* of the statement date.
