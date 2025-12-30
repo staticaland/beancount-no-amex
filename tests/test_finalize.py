@@ -1,7 +1,8 @@
 """Component tests for transaction finalization (finalize method).
 
 The finalize() method applies categorization rules to transactions:
-- Matches narration text against configured patterns
+- Matches narration text against configured patterns (substring or regex)
+- Matches transactions by amount conditions (lt, lte, gt, gte, eq, between)
 - Adds a balancing posting to the matched expense account
 - Returns the transaction unchanged if no pattern matches
 """
@@ -14,7 +15,12 @@ from beancount.core.amount import Amount
 from beancount.core.number import D
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
-from beancount_no_amex.models import RawTransaction
+from beancount_no_amex.models import (
+    AmountCondition,
+    AmountOperator,
+    RawTransaction,
+    TransactionPattern,
+)
 
 
 class TestFinalizeBasics:
@@ -339,3 +345,380 @@ class TestFinalizeEdgeCases:
         # Should return unchanged (no postings to balance)
         assert result == txn
         assert len(result.postings) == 0
+
+
+class TestFinalizeTransactionPatterns:
+    """Tests for advanced transaction_patterns matching."""
+
+    @pytest.fixture
+    def importer_with_patterns(self):
+        """Importer with transaction_patterns configured."""
+        config = AmexAccountConfig(
+            account_name="Liabilities:CreditCard:Amex",
+            currency="NOK",
+            transaction_patterns=[
+                # Regex pattern for grocery stores
+                TransactionPattern(
+                    narration=r"REMA\s*1000",
+                    regex=True,
+                    case_insensitive=True,
+                    account="Expenses:Groceries:Rema",
+                ),
+                # Amount-only pattern for small purchases
+                TransactionPattern(
+                    amount_condition=AmountCondition(
+                        operator=AmountOperator.LT,
+                        value=Decimal("50"),
+                    ),
+                    account="Expenses:PettyCash",
+                ),
+                # Combined pattern
+                TransactionPattern(
+                    narration="VINMONOPOLET",
+                    amount_condition=AmountCondition(
+                        operator=AmountOperator.GT,
+                        value=Decimal("500"),
+                    ),
+                    account="Expenses:Alcohol:Expensive",
+                ),
+            ],
+        )
+        return Importer(config=config, debug=False)
+
+    def test_regex_pattern_matches(self, importer_with_patterns):
+        """Regex pattern in transaction_patterns matches correctly."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-250.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="REMA 1000 OSLO",
+            narration="REMA 1000 OSLO",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_patterns.finalize(txn, RawTransaction())
+
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Groceries:Rema"
+        assert result.postings[1].units.number == D("250.00")
+
+    def test_case_insensitive_pattern_matches(self, importer_with_patterns):
+        """Case-insensitive pattern matches regardless of case."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-150.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="rema1000 store",
+            narration="rema1000 store",  # lowercase
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_patterns.finalize(txn, RawTransaction())
+
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Groceries:Rema"
+
+    def test_amount_only_pattern_matches(self, importer_with_patterns):
+        """Pattern with only amount condition matches based on amount."""
+        meta = data.new_metadata("test.qbo", 1)
+        # Small purchase under 50
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-25.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="UNKNOWN MERCHANT",
+            narration="UNKNOWN MERCHANT",  # Doesn't match any narration pattern
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_patterns.finalize(txn, RawTransaction())
+
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:PettyCash"
+
+    def test_combined_pattern_requires_both(self, importer_with_patterns):
+        """Combined pattern requires BOTH narration and amount to match."""
+        meta = data.new_metadata("test.qbo", 1)
+
+        # Matches narration but not amount (under 500)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-200.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="VINMONOPOLET OSLO",
+            narration="VINMONOPOLET OSLO",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_patterns.finalize(txn, RawTransaction())
+
+        # Should NOT match (amount too low), falls through to amount-only pattern
+        # But 200 is >= 50, so no match at all
+        assert len(result.postings) == 1
+
+    def test_combined_pattern_matches_when_both_conditions_met(self, importer_with_patterns):
+        """Combined pattern matches when both narration and amount match."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-750.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="VINMONOPOLET OSLO",
+            narration="VINMONOPOLET OSLO",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_patterns.finalize(txn, RawTransaction())
+
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Alcohol:Expensive"
+
+    def test_first_matching_pattern_wins(self, importer_with_patterns):
+        """First matching pattern is used (order matters)."""
+        meta = data.new_metadata("test.qbo", 1)
+        # Small REMA purchase - matches both regex and amount patterns
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-30.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="REMA 1000",
+            narration="REMA 1000",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_patterns.finalize(txn, RawTransaction())
+
+        # REMA pattern is first, so it wins
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Groceries:Rema"
+
+
+class TestFinalizeMixedMappings:
+    """Tests for using both legacy and new pattern matching together."""
+
+    @pytest.fixture
+    def importer_with_both(self):
+        """Importer with both legacy mappings and transaction_patterns."""
+        config = AmexAccountConfig(
+            account_name="Liabilities:CreditCard:Amex",
+            currency="NOK",
+            # Legacy mappings checked first
+            narration_to_account_mappings=[
+                ("SPOTIFY", "Expenses:Music:Legacy"),
+            ],
+            # Advanced patterns checked second
+            transaction_patterns=[
+                TransactionPattern(
+                    narration="SPOTIFY",
+                    case_insensitive=True,
+                    account="Expenses:Music:Advanced",
+                ),
+                TransactionPattern(
+                    amount_condition=AmountCondition(
+                        operator=AmountOperator.GT,
+                        value=Decimal("1000"),
+                    ),
+                    account="Expenses:BigPurchases",
+                ),
+            ],
+        )
+        return Importer(config=config, debug=False)
+
+    def test_legacy_mappings_checked_first(self, importer_with_both):
+        """Legacy narration_to_account_mappings are checked before transaction_patterns."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-99.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="SPOTIFY Premium",
+            narration="SPOTIFY Premium",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_both.finalize(txn, RawTransaction())
+
+        # Legacy mapping wins (checked first)
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Music:Legacy"
+
+    def test_transaction_patterns_used_when_legacy_doesnt_match(self, importer_with_both):
+        """Transaction patterns are used when legacy mappings don't match."""
+        meta = data.new_metadata("test.qbo", 1)
+        # lowercase "spotify" doesn't match legacy (case-sensitive)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-99.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="spotify Premium",
+            narration="spotify Premium",  # lowercase
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_both.finalize(txn, RawTransaction())
+
+        # Advanced pattern matches (case-insensitive)
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Music:Advanced"
+
+    def test_amount_pattern_fallback(self, importer_with_both):
+        """Amount-only patterns work as fallback for unmatched narrations."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-1500.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="UNKNOWN EXPENSIVE STORE",
+            narration="UNKNOWN EXPENSIVE STORE",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_both.finalize(txn, RawTransaction())
+
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:BigPurchases"
+
+
+class TestFinalizeAmountConditions:
+    """Tests for various amount condition operators in finalize."""
+
+    @pytest.fixture
+    def importer_with_amount_patterns(self):
+        """Importer with various amount-based patterns."""
+        config = AmexAccountConfig(
+            account_name="Liabilities:CreditCard:Amex",
+            currency="NOK",
+            transaction_patterns=[
+                # Exact amount
+                TransactionPattern(
+                    amount_condition=AmountCondition(
+                        operator=AmountOperator.EQ,
+                        value=Decimal("99.00"),
+                    ),
+                    account="Expenses:Subscriptions",
+                ),
+                # Range
+                TransactionPattern(
+                    amount_condition=AmountCondition(
+                        operator=AmountOperator.BETWEEN,
+                        value=Decimal("100"),
+                        value2=Decimal("500"),
+                    ),
+                    account="Expenses:MediumPurchases",
+                ),
+            ],
+        )
+        return Importer(config=config, debug=False)
+
+    def test_exact_amount_matches(self, importer_with_amount_patterns):
+        """Exact amount (EQ) pattern matches."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-99.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="ANY SERVICE",
+            narration="ANY SERVICE",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_amount_patterns.finalize(txn, RawTransaction())
+
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Subscriptions"
+
+    def test_between_amount_matches(self, importer_with_amount_patterns):
+        """Amount range (BETWEEN) pattern matches."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-250.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="SOME STORE",
+            narration="SOME STORE",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_amount_patterns.finalize(txn, RawTransaction())
+
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:MediumPurchases"

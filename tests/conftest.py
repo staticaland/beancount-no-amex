@@ -14,10 +14,13 @@ import pytest
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
 from beancount_no_amex.models import (
+    AmountCondition,
+    AmountOperator,
     BeanTransaction,
     ParsedTransaction,
     QboFileData,
     RawTransaction,
+    TransactionPattern,
 )
 
 
@@ -193,6 +196,78 @@ def config_with_account_id() -> AmexAccountConfig:
     )
 
 
+@pytest.fixture
+def config_with_patterns() -> AmexAccountConfig:
+    """Configuration with advanced transaction patterns.
+
+    Demonstrates regex matching, case-insensitivity, and amount conditions.
+    """
+    return AmexAccountConfig(
+        account_name="Liabilities:CreditCard:Amex",
+        currency="NOK",
+        transaction_patterns=[
+            # Regex pattern with case insensitivity
+            TransactionPattern(
+                narration=r"REMA\s*1000",
+                regex=True,
+                case_insensitive=True,
+                account="Expenses:Groceries:Rema",
+            ),
+            # Amount-only pattern (small purchases)
+            TransactionPattern(
+                amount_condition=AmountCondition(
+                    operator=AmountOperator.LT,
+                    value=Decimal("50"),
+                ),
+                account="Expenses:PettyCash",
+            ),
+            # Combined narration + amount
+            TransactionPattern(
+                narration="VINMONOPOLET",
+                amount_condition=AmountCondition(
+                    operator=AmountOperator.GT,
+                    value=Decimal("500"),
+                ),
+                account="Expenses:Alcohol:Expensive",
+            ),
+        ],
+    )
+
+
+@pytest.fixture
+def config_with_mixed_mappings() -> AmexAccountConfig:
+    """Configuration with both legacy and advanced patterns.
+
+    Legacy narration_to_account_mappings are checked first,
+    then transaction_patterns are checked.
+    """
+    return AmexAccountConfig(
+        account_name="Liabilities:CreditCard:Amex",
+        currency="NOK",
+        narration_to_account_mappings=[
+            ("SPOTIFY", "Expenses:Music"),
+            ("NETFLIX", "Expenses:Streaming"),
+        ],
+        transaction_patterns=[
+            # Case-insensitive fallback for streaming services
+            TransactionPattern(
+                narration=r"(spotify|netflix|hbo)",
+                regex=True,
+                case_insensitive=True,
+                account="Expenses:Entertainment",
+            ),
+            # Large purchases
+            TransactionPattern(
+                amount_condition=AmountCondition(
+                    operator=AmountOperator.GTE,
+                    value=Decimal("1000"),
+                ),
+                account="Expenses:LargePurchases",
+            ),
+        ],
+    )
+
+
 # =============================================================================
 # Importer Fixtures
 # =============================================================================
@@ -214,6 +289,18 @@ def importer_with_mappings(config_with_mappings) -> Importer:
 def importer_with_account_id(config_with_account_id) -> Importer:
     """An importer configured for a specific account ID."""
     return Importer(config=config_with_account_id, debug=False)
+
+
+@pytest.fixture
+def importer_with_patterns(config_with_patterns) -> Importer:
+    """An importer configured with advanced transaction patterns."""
+    return Importer(config=config_with_patterns, debug=False)
+
+
+@pytest.fixture
+def importer_with_mixed(config_with_mixed_mappings) -> Importer:
+    """An importer with both legacy and advanced pattern matching."""
+    return Importer(config=config_with_mixed_mappings, debug=False)
 
 
 # =============================================================================

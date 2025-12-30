@@ -13,7 +13,13 @@ from beancount.core.number import D
 from lxml import etree
 from pydantic import ValidationError
 
-from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
+from beancount_no_amex.models import (
+    BeanTransaction,
+    ParsedTransaction,
+    QboFileData,
+    RawTransaction,
+    TransactionPattern,
+)
 
 # Constants
 DEFAULT_CURRENCY = "NOK"
@@ -37,14 +43,54 @@ class AmexAccountConfig:
         account_id: Optional QBO account ID for matching specific cards (e.g., 'XYZ|98765').
                     When set, the importer will only match files with this exact ACCTID.
                     When None, the importer matches any Amex QBO file.
-        narration_to_account_mappings: List of (pattern, account) tuples for auto-categorization.
+        narration_to_account_mappings: List of (pattern, account) tuples for simple substring
+                    matching (legacy, backward-compatible). Pattern matches anywhere in narration.
+        transaction_patterns: List of TransactionPattern objects for advanced pattern matching.
+                    Supports regex, case-insensitive matching, and amount-based conditions.
+                    These patterns are checked AFTER narration_to_account_mappings.
         skip_deduplication: When True, skip FITID-based deduplication (default: False).
                            Useful for forcing re-import of transactions.
+
+    Example with transaction_patterns:
+        from beancount_no_amex.models import TransactionPattern, AmountCondition, AmountOperator
+        from decimal import Decimal
+
+        config = AmexAccountConfig(
+            account_name='Liabilities:CreditCard:Amex',
+            currency='NOK',
+            transaction_patterns=[
+                # Regex match with case insensitivity
+                TransactionPattern(
+                    narration=r"REMA\\s*1000",
+                    regex=True,
+                    case_insensitive=True,
+                    account="Expenses:Groceries"
+                ),
+                # Amount-only match (small purchases)
+                TransactionPattern(
+                    amount_condition=AmountCondition(
+                        operator=AmountOperator.LT,
+                        value=Decimal("50")
+                    ),
+                    account="Expenses:PettyCash"
+                ),
+                # Combined: merchant + amount range
+                TransactionPattern(
+                    narration="VINMONOPOLET",
+                    amount_condition=AmountCondition(
+                        operator=AmountOperator.GT,
+                        value=Decimal("500")
+                    ),
+                    account="Expenses:Entertainment:Alcohol:Expensive"
+                ),
+            ],
+        )
     """
     account_name: str
     currency: str
     account_id: str | None = None
     narration_to_account_mappings: list[tuple[str, str]] = field(default_factory=list)
+    transaction_patterns: list[TransactionPattern] = field(default_factory=list)
     skip_deduplication: bool = False
 
 
@@ -129,6 +175,7 @@ class Importer(beangulp.Importer):
         self.currency = config.currency  # Store configured currency
         self.account_id = config.account_id  # Optional account ID for matching
         self.narration_to_account_mappings = config.narration_to_account_mappings
+        self.transaction_patterns = config.transaction_patterns
         self.skip_deduplication = config.skip_deduplication
         self.flag = flag
         self.debug = debug
@@ -331,7 +378,13 @@ class Importer(beangulp.Importer):
 
     def finalize(self, txn: data.Transaction, row: Any) -> data.Transaction | None:
         """
-        Post-process the transaction with categorization based on narration.
+        Post-process the transaction with categorization based on narration and/or amount.
+
+        Matching is done in two phases:
+        1. Legacy narration_to_account_mappings (simple substring matching)
+        2. Advanced transaction_patterns (regex, case-insensitive, amount conditions)
+
+        The first matching pattern wins. If a match is found in phase 1, phase 2 is skipped.
 
         Args:
             txn: The transaction object to finalize.
@@ -340,20 +393,47 @@ class Importer(beangulp.Importer):
         Returns:
             The modified transaction, or None if invalid.
         """
-        # If no categorization rules or no postings, return transaction unchanged
-        if not self.narration_to_account_mappings or not txn.postings:
-            return txn  # No changes if no mappings or postings
+        # If no postings, return transaction unchanged
+        if not txn.postings:
+            return txn
 
+        # No categorization rules defined
+        if not self.narration_to_account_mappings and not self.transaction_patterns:
+            return txn
+
+        # Get the primary posting amount for pattern matching
+        amount = txn.postings[0].units.number
+        narration = txn.narration or ""
+
+        # Phase 1: Legacy simple substring matching
         for pattern, account in self.narration_to_account_mappings:
-            if pattern in txn.narration:
-                # Create a balancing posting with the opposite amount
-                opposite_units = Amount(-txn.postings[0].units.number, txn.postings[0].units.currency)
-                balancing_posting = data.Posting(
-                    account, opposite_units, None, None, None, None
-                )
-                # Append the new posting
-                return txn._replace(postings=txn.postings + [balancing_posting])
+            if pattern in narration:
+                return self._add_balancing_posting(txn, account)
+
+        # Phase 2: Advanced pattern matching
+        for pattern in self.transaction_patterns:
+            if pattern.matches(narration, amount):
+                return self._add_balancing_posting(txn, pattern.account)
+
         return txn  # Return unchanged if no patterns match
+
+    def _add_balancing_posting(
+        self, txn: data.Transaction, account: str
+    ) -> data.Transaction:
+        """Add a balancing posting to the transaction.
+
+        Args:
+            txn: The transaction to modify.
+            account: The target account for the balancing posting.
+
+        Returns:
+            The transaction with the balancing posting added.
+        """
+        opposite_units = Amount(
+            -txn.postings[0].units.number, txn.postings[0].units.currency
+        )
+        balancing_posting = data.Posting(account, opposite_units, None, None, None, None)
+        return txn._replace(postings=txn.postings + [balancing_posting])
 
     def extract(self, filepath: str, existing_entries: list[data.Directive]) -> list[data.Directive]:
         """
