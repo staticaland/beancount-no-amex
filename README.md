@@ -216,6 +216,104 @@ def get_importers():
     ]
 ```
 
+### Splitting Transactions
+
+When you pay for something that should be split with a partner, roommate, or friend, there are several strategies for tracking who owes what.
+
+#### Strategy 1: Receivables Account (Recommended)
+
+Create an account to track what others owe you:
+
+```beancount
+; In main.beancount
+2020-01-01 open Assets:Receivables:Alex NOK
+```
+
+When you pay for a shared expense, split the transaction:
+
+```beancount
+2024-03-15 * "REMA 1000" "Groceries - split with Alex"
+  Liabilities:CreditCard:Amex    -400 NOK
+  Expenses:Groceries              200 NOK  ; Your half
+  Assets:Receivables:Alex         200 NOK  ; Alex's half
+```
+
+When Alex pays you back:
+
+```beancount
+2024-03-20 * "Vipps from Alex" "Settling grocery bill"
+  Assets:Bank:Checking            200 NOK
+  Assets:Receivables:Alex        -200 NOK
+```
+
+The `Assets:Receivables:Alex` account balance shows how much Alex owes you at any time.
+
+#### Strategy 2: Automatic Splitting with Patterns
+
+For merchants you always split (like a shared Netflix account), configure automatic splitting in your importer:
+
+```python
+# In importers.py - manually edit imported transactions
+# This requires post-processing, but you can use patterns to tag them:
+TransactionPattern(
+    narration="NETFLIX",
+    account="Expenses:Subscriptions:Streaming",
+    # Add a tag or link to remind you to split this
+),
+```
+
+Then manually adjust the imported transaction to split it:
+
+```beancount
+2024-03-01 * "NETFLIX" "Shared subscription"
+  Liabilities:CreditCard:Amex    -179 NOK
+  Expenses:Subscriptions          89.50 NOK
+  Assets:Receivables:Partner      89.50 NOK
+```
+
+#### Strategy 3: Payables for What You Owe
+
+If someone else pays and you owe them, use a payables account:
+
+```beancount
+2020-01-01 open Liabilities:Payables:Partner NOK
+```
+
+When your partner pays for dinner you split:
+
+```beancount
+2024-03-15 * "Partner paid for dinner"
+  Expenses:Dining                 250 NOK  ; Your half
+  Liabilities:Payables:Partner   -250 NOK  ; You owe partner
+```
+
+When you pay them back:
+
+```beancount
+2024-03-20 * "Paid partner back"
+  Liabilities:Payables:Partner    250 NOK
+  Assets:Bank:Checking           -250 NOK
+```
+
+#### Strategy 4: Periodic Settlement
+
+Instead of tracking individual transactions, some couples or roommates prefer periodic settlement. Track your shared expenses separately:
+
+```beancount
+2020-01-01 open Expenses:Shared:Groceries NOK
+2020-01-01 open Expenses:Shared:Utilities NOK
+2020-01-01 open Expenses:Shared:Rent NOK
+```
+
+At the end of each month, query total shared expenses in Fava, split 50/50, and settle up with a single transfer.
+
+#### Tips for Shared Finances
+
+- **Use Fava queries** to see receivables/payables balances: navigate to the account in Fava to see the running balance
+- **Add metadata** for context: `partner: "Alex"` or `split: "50/50"`
+- **Consider links** for related transactions: `^settling-march-expenses`
+- **Regular settlement** prevents large balances from accumulating
+
 ### Deduplication
 
 Transactions are automatically deduplicated using FITID (Financial Transaction ID). Re-running the import won't create duplicates. To force re-import:
