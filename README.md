@@ -295,23 +295,82 @@ When you pay them back:
   Assets:Bank:Checking           -250 NOK
 ```
 
-#### Strategy 4: Periodic Settlement
+#### Strategy 4: Periodic Settlement with Queries
 
-Instead of tracking individual transactions, some couples or roommates prefer periodic settlement. Track your shared expenses separately:
+Instead of settling each transaction, do monthly settlements using queries to calculate the amount.
+
+**Step 1:** Throughout the month, record split transactions:
 
 ```beancount
-2020-01-01 open Expenses:Shared:Groceries NOK
-2020-01-01 open Expenses:Shared:Utilities NOK
-2020-01-01 open Expenses:Shared:Rent NOK
+2024-03-10 * "REMA 1000" "Groceries"
+  Liabilities:CreditCard:Amex    -400 NOK
+  Expenses:Groceries              200 NOK
+  Assets:Receivables:Alex         200 NOK
+
+2024-03-15 * "NETFLIX"
+  Liabilities:CreditCard:Amex    -179 NOK
+  Expenses:Subscriptions          89.50 NOK
+  Assets:Receivables:Alex         89.50 NOK
 ```
 
-At the end of each month, query total shared expenses in Fava, split 50/50, and settle up with a single transfer.
+**Step 2:** Query how much Alex owes for the month (in Fava's Query page):
+
+```sql
+SELECT sum(position)
+WHERE account = "Assets:Receivables:Alex"
+  AND date >= 2024-03-01
+  AND date < 2024-04-01
+```
+
+Result: `289.50 NOK`
+
+**Step 3:** Create the settlement transaction:
+
+```beancount
+2024-04-01 * "March settlement from Alex"
+  Assets:Bank:Checking            289.50 NOK
+  Assets:Receivables:Alex        -289.50 NOK
+```
+
+**Useful queries:**
+
+```sql
+-- Current total balance (what they owe now)
+SELECT sum(position) WHERE account = "Assets:Receivables:Alex"
+
+-- Monthly breakdown for the year
+SELECT month, sum(position)
+WHERE account = "Assets:Receivables:Alex"
+GROUP BY month
+
+-- All transactions in the receivable account
+SELECT date, narration, position
+WHERE account = "Assets:Receivables:Alex"
+```
+
+**Full year example** (after running monthly queries):
+
+```beancount
+2024-02-01 * "January settlement"
+  Assets:Bank:Checking         720 NOK
+  Assets:Receivables:Alex     -720 NOK
+
+2024-03-01 * "February settlement"
+  Assets:Bank:Checking         650 NOK
+  Assets:Receivables:Alex     -650 NOK
+
+2024-04-01 * "March settlement"
+  Assets:Bank:Checking         289.50 NOK
+  Assets:Receivables:Alex     -289.50 NOK
+```
+
+After all settlements, `Assets:Receivables:Alex` balance should be 0.
 
 #### Tips for Shared Finances
 
-- **Use Fava queries** to see receivables/payables balances: navigate to the account in Fava to see the running balance
+- **Check balances in Fava**: Navigate to the receivables account to see running balance
 - **Add metadata** for context: `partner: "Alex"` or `split: "50/50"`
-- **Consider links** for related transactions: `^settling-march-expenses`
+- **Use links** to connect related transactions: `^march-2024-settlement`
 - **Regular settlement** prevents large balances from accumulating
 
 ### Deduplication
