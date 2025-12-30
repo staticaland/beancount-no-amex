@@ -15,36 +15,32 @@ mkdir finances && cd finances
 uv init
 ```
 
-### 2. Configure dependencies
+### 2. Add dependencies
 
-Replace your `pyproject.toml` with:
+```bash
+# Add core dependencies
+uv add "beancount>=3.1.0" fava
+
+# Add git-based dependencies
+uv add beangulp --git https://github.com/beancount/beangulp
+uv add beancount-no-amex --git https://github.com/staticaland/beancount-no-amex
+```
+
+### 3. Configure as a package (manual edit needed)
+
+Add the following to your `pyproject.toml`:
 
 ```toml
-[project]
-name = "finances"
-version = "0.1.0"
-description = "Personal finance tracking with Beancount"
-readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "beancount>=3.1.0",
-    "beancount-no-amex",
-    "beangulp",
-    "fava",
-]
-
-[project.scripts]
-import-transactions = "finances.importers:main"
-
 [tool.uv]
 package = true
 
-[tool.uv.sources]
-beangulp = { git = "https://github.com/beancount/beangulp" }
-beancount-no-amex = { git = "https://github.com/staticaland/beancount-no-amex" }
+[project.scripts]
+import-transactions = "finances.importers:main"
 ```
 
-### 3. Install dependencies
+This enables the `import-transactions` command and makes your project installable.
+
+Then sync to apply the changes:
 
 ```bash
 uv sync
