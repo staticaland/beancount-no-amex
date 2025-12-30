@@ -18,6 +18,8 @@ from beancount_no_amex.models import (
     ParsedTransaction,
     QboFileData,
     RawTransaction,
+    TransactionPattern,
+    amount,
 )
 
 
@@ -166,16 +168,16 @@ def basic_config() -> AmexAccountConfig:
 
 @pytest.fixture
 def config_with_mappings() -> AmexAccountConfig:
-    """Configuration with narration-to-account mappings for categorization."""
+    """Configuration with transaction patterns for categorization."""
     return AmexAccountConfig(
         account_name="Liabilities:CreditCard:Amex",
         currency="NOK",
-        narration_to_account_mappings=[
-            ("VINMONOPOLET", "Expenses:Groceries"),
-            ("SPOTIFY", "Expenses:Entertainment:Music"),
-            ("NETFLIX", "Expenses:Entertainment:Streaming"),
-            ("REMA", "Expenses:Groceries"),
-            ("KIWI", "Expenses:Groceries"),
+        transaction_patterns=[
+            TransactionPattern(narration="VINMONOPOLET", account="Expenses:Groceries"),
+            TransactionPattern(narration="SPOTIFY", account="Expenses:Entertainment:Music"),
+            TransactionPattern(narration="NETFLIX", account="Expenses:Entertainment:Streaming"),
+            TransactionPattern(narration="REMA", account="Expenses:Groceries"),
+            TransactionPattern(narration="KIWI", account="Expenses:Groceries"),
         ],
     )
 
@@ -187,8 +189,31 @@ def config_with_account_id() -> AmexAccountConfig:
         account_name="Liabilities:CreditCard:Amex:Personal",
         currency="NOK",
         account_id="XYZ|98765",
-        narration_to_account_mappings=[
-            ("VINMONOPOLET", "Expenses:Groceries"),
+        transaction_patterns=[
+            TransactionPattern(narration="VINMONOPOLET", account="Expenses:Groceries"),
+        ],
+    )
+
+
+@pytest.fixture
+def config_with_patterns() -> AmexAccountConfig:
+    """Configuration with advanced patterns: regex, case-insensitive, amounts."""
+    return AmexAccountConfig(
+        account_name="Liabilities:CreditCard:Amex",
+        currency="NOK",
+        transaction_patterns=[
+            TransactionPattern(
+                narration=r"REMA\s*1000",
+                regex=True,
+                case_insensitive=True,
+                account="Expenses:Groceries:Rema",
+            ),
+            TransactionPattern(amount_condition=amount < 50, account="Expenses:PettyCash"),
+            TransactionPattern(
+                narration="VINMONOPOLET",
+                amount_condition=amount > 500,
+                account="Expenses:Alcohol:Expensive",
+            ),
         ],
     )
 
@@ -214,6 +239,12 @@ def importer_with_mappings(config_with_mappings) -> Importer:
 def importer_with_account_id(config_with_account_id) -> Importer:
     """An importer configured for a specific account ID."""
     return Importer(config=config_with_account_id, debug=False)
+
+
+@pytest.fixture
+def importer_with_patterns(config_with_patterns) -> Importer:
+    """An importer configured with advanced transaction patterns."""
+    return Importer(config=config_with_patterns, debug=False)
 
 
 # =============================================================================

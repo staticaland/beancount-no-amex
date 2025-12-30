@@ -13,7 +13,13 @@ from beancount.core.number import D
 from lxml import etree
 from pydantic import ValidationError
 
-from beancount_no_amex.models import BeanTransaction, ParsedTransaction, QboFileData, RawTransaction
+from beancount_no_amex.models import (
+    BeanTransaction,
+    ParsedTransaction,
+    QboFileData,
+    RawTransaction,
+    TransactionPattern,
+)
 
 # Constants
 DEFAULT_CURRENCY = "NOK"
@@ -37,14 +43,48 @@ class AmexAccountConfig:
         account_id: Optional QBO account ID for matching specific cards (e.g., 'XYZ|98765').
                     When set, the importer will only match files with this exact ACCTID.
                     When None, the importer matches any Amex QBO file.
-        narration_to_account_mappings: List of (pattern, account) tuples for auto-categorization.
+        transaction_patterns: List of TransactionPattern objects for categorization.
+                    Supports substring matching, regex, case-insensitive, and amount conditions.
         skip_deduplication: When True, skip FITID-based deduplication (default: False).
                            Useful for forcing re-import of transactions.
+
+    Example:
+        from beancount_no_amex import AmexAccountConfig, TransactionPattern, amount
+
+        config = AmexAccountConfig(
+            account_name='Liabilities:CreditCard:Amex',
+            currency='NOK',
+            transaction_patterns=[
+                # Simple substring match
+                TransactionPattern(narration="SPOTIFY", account="Expenses:Music"),
+
+                # Regex match with case insensitivity
+                TransactionPattern(
+                    narration=r"REMA\\s*1000",
+                    regex=True,
+                    case_insensitive=True,
+                    account="Expenses:Groceries"
+                ),
+
+                # Amount-only match (small purchases)
+                TransactionPattern(
+                    amount_condition=amount < 50,
+                    account="Expenses:PettyCash"
+                ),
+
+                # Combined: merchant + amount range
+                TransactionPattern(
+                    narration="VINMONOPOLET",
+                    amount_condition=amount > 500,
+                    account="Expenses:Alcohol:Expensive"
+                ),
+            ],
+        )
     """
     account_name: str
     currency: str
     account_id: str | None = None
-    narration_to_account_mappings: list[tuple[str, str]] = field(default_factory=list)
+    transaction_patterns: list[TransactionPattern] = field(default_factory=list)
     skip_deduplication: bool = False
 
 
@@ -128,7 +168,7 @@ class Importer(beangulp.Importer):
         self.account_name = config.account_name
         self.currency = config.currency  # Store configured currency
         self.account_id = config.account_id  # Optional account ID for matching
-        self.narration_to_account_mappings = config.narration_to_account_mappings
+        self.transaction_patterns = config.transaction_patterns
         self.skip_deduplication = config.skip_deduplication
         self.flag = flag
         self.debug = debug
@@ -330,30 +370,44 @@ class Importer(beangulp.Importer):
         return latest_date
 
     def finalize(self, txn: data.Transaction, row: Any) -> data.Transaction | None:
-        """
-        Post-process the transaction with categorization based on narration.
+        """Post-process the transaction with categorization based on patterns.
 
         Args:
             txn: The transaction object to finalize.
             row: The original transaction data from the QBO file.
 
         Returns:
-            The modified transaction, or None if invalid.
+            The modified transaction with balancing posting, or unchanged if no match.
         """
-        # If no categorization rules or no postings, return transaction unchanged
-        if not self.narration_to_account_mappings or not txn.postings:
-            return txn  # No changes if no mappings or postings
+        if not txn.postings or not self.transaction_patterns:
+            return txn
 
-        for pattern, account in self.narration_to_account_mappings:
-            if pattern in txn.narration:
-                # Create a balancing posting with the opposite amount
-                opposite_units = Amount(-txn.postings[0].units.number, txn.postings[0].units.currency)
-                balancing_posting = data.Posting(
-                    account, opposite_units, None, None, None, None
-                )
-                # Append the new posting
-                return txn._replace(postings=txn.postings + [balancing_posting])
-        return txn  # Return unchanged if no patterns match
+        narration = txn.narration or ""
+        txn_amount = txn.postings[0].units.number
+
+        for pattern in self.transaction_patterns:
+            if pattern.matches(narration, txn_amount):
+                return self._add_balancing_posting(txn, pattern.account)
+
+        return txn
+
+    def _add_balancing_posting(
+        self, txn: data.Transaction, account: str
+    ) -> data.Transaction:
+        """Add a balancing posting to the transaction.
+
+        Args:
+            txn: The transaction to modify.
+            account: The target account for the balancing posting.
+
+        Returns:
+            The transaction with the balancing posting added.
+        """
+        opposite_units = Amount(
+            -txn.postings[0].units.number, txn.postings[0].units.currency
+        )
+        balancing_posting = data.Posting(account, opposite_units, None, None, None, None)
+        return txn._replace(postings=txn.postings + [balancing_posting])
 
     def extract(self, filepath: str, existing_entries: list[data.Directive]) -> list[data.Directive]:
         """
@@ -515,47 +569,23 @@ class Importer(beangulp.Importer):
 def get_importers() -> list[beangulp.Importer]:
     """Create and return a list of configured importers.
 
-    This function demonstrates how to configure multiple Amex account importers.
     Each importer can be configured with:
     - A unique account_id to match specific QBO files
     - Different account names for different cards
     - Separate categorization rules per account
-
-    Example with multiple accounts:
-        return [
-            Importer(AmexAccountConfig(
-                account_name='Liabilities:CreditCard:Amex:Personal',
-                currency='NOK',
-                account_id='XYZ|12345',  # Personal card account ID
-                narration_to_account_mappings=[
-                    ('VINMONOPOLET', 'Expenses:Groceries'),
-                    ('SPOTIFY', 'Expenses:Entertainment:Music'),
-                ],
-            )),
-            Importer(AmexAccountConfig(
-                account_name='Liabilities:CreditCard:Amex:Business',
-                currency='NOK',
-                account_id='XYZ|67890',  # Business card account ID
-                narration_to_account_mappings=[
-                    ('GITHUB', 'Expenses:Business:Software'),
-                    ('AWS', 'Expenses:Business:Cloud'),
-                ],
-            )),
-        ]
     """
-    # Default configuration - single importer without account_id filtering
-    # Matches any Amex QBO file
+    from beancount_no_amex.models import amount
+
     return [
         Importer(AmexAccountConfig(
             account_name='Liabilities:CreditCard:Amex',
             currency='NOK',
-            # account_id='XYZ|98765',  # Uncomment and set to match specific card
-            narration_to_account_mappings=[
-                ('GITHUB', 'Expenses:Cloud-Services:Source-Hosting:Github'),
-                ('Fedex', 'Expenses:Postage:FedEx'),
-                ('FREMTIND', 'Expenses:Insurance'),
-                ('Meny Alna Oslo', 'Expenses:Groceries'),
-                ('VINMONOPOLET', 'Expenses:Groceries'),
+            transaction_patterns=[
+                TransactionPattern(narration='GITHUB', account='Expenses:Cloud-Services:Github'),
+                TransactionPattern(narration='Fedex', account='Expenses:Postage:FedEx'),
+                TransactionPattern(narration='FREMTIND', account='Expenses:Insurance'),
+                TransactionPattern(narration='VINMONOPOLET', account='Expenses:Groceries'),
+                TransactionPattern(amount_condition=amount < 50, account='Expenses:PettyCash'),
             ],
         )),
     ]
