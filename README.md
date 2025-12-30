@@ -222,21 +222,25 @@ When you pay for something that should be split with a partner, roommate, or fri
 
 #### Strategy 1: Receivables Account (Recommended)
 
-Create an account to track what others owe you:
+Create accounts to track what others owe you and to offset your expenses:
 
 ```beancount
 ; In main.beancount
 2020-01-01 open Assets:Receivables:Alex NOK
+2020-01-01 open Income:Reimbursements NOK
 ```
 
-When you pay for a shared expense, split the transaction:
+When you pay for a shared expense, use four postings to preserve full household visibility:
 
 ```beancount
 2024-03-15 * "REMA 1000" "Groceries - split with Alex"
   Liabilities:CreditCard:Amex    -400 NOK
-  Expenses:Groceries              200 NOK  ; Your half
-  Assets:Receivables:Alex         200 NOK  ; Alex's half
+  Expenses:Groceries              400 NOK  ; Full household spend
+  Assets:Receivables:Alex         200 NOK  ; Alex's half (tracked as debt)
+  Income:Reimbursements          -200 NOK  ; Offsets your net expense
 ```
+
+This way `Expenses:Groceries` shows the true household spending (400 NOK), while your net cost remains correct (200 NOK after the reimbursement offset).
 
 When Alex pays you back:
 
@@ -252,18 +256,20 @@ The `Assets:Receivables:Alex` account balance shows how much Alex owes you at an
 
 Instead of settling each transaction, do monthly settlements using queries to calculate the amount.
 
-**Step 1:** Throughout the month, record split transactions:
+**Step 1:** Throughout the month, record split transactions (4 postings each):
 
 ```beancount
 2024-03-10 * "REMA 1000" "Groceries"
   Liabilities:CreditCard:Amex    -400 NOK
-  Expenses:Groceries              200 NOK
+  Expenses:Groceries              400 NOK
   Assets:Receivables:Alex         200 NOK
+  Income:Reimbursements          -200 NOK
 
 2024-03-15 * "NETFLIX"
   Liabilities:CreditCard:Amex    -179 NOK
-  Expenses:Subscriptions          89.50 NOK
+  Expenses:Subscriptions          179 NOK
   Assets:Receivables:Alex         89.50 NOK
+  Income:Reimbursements          -89.50 NOK
 ```
 
 **Step 2:** Query how much Alex owes for the month (in Fava's Query page):
