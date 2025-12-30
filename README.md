@@ -248,54 +248,7 @@ When Alex pays you back:
 
 The `Assets:Receivables:Alex` account balance shows how much Alex owes you at any time.
 
-#### Strategy 2: Automatic Splitting with Patterns
-
-For merchants you always split (like a shared Netflix account), configure automatic splitting in your importer:
-
-```python
-# In importers.py - manually edit imported transactions
-# This requires post-processing, but you can use patterns to tag them:
-TransactionPattern(
-    narration="NETFLIX",
-    account="Expenses:Subscriptions:Streaming",
-    # Add a tag or link to remind you to split this
-),
-```
-
-Then manually adjust the imported transaction to split it:
-
-```beancount
-2024-03-01 * "NETFLIX" "Shared subscription"
-  Liabilities:CreditCard:Amex    -179 NOK
-  Expenses:Subscriptions          89.50 NOK
-  Assets:Receivables:Partner      89.50 NOK
-```
-
-#### Strategy 3: Payables for What You Owe
-
-If someone else pays and you owe them, use a payables account:
-
-```beancount
-2020-01-01 open Liabilities:Payables:Partner NOK
-```
-
-When your partner pays for dinner you split:
-
-```beancount
-2024-03-15 * "Partner paid for dinner"
-  Expenses:Dining                 250 NOK  ; Your half
-  Liabilities:Payables:Partner   -250 NOK  ; You owe partner
-```
-
-When you pay them back:
-
-```beancount
-2024-03-20 * "Paid partner back"
-  Liabilities:Payables:Partner    250 NOK
-  Assets:Bank:Checking           -250 NOK
-```
-
-#### Strategy 4: Periodic Settlement with Queries
+#### Strategy 2: Periodic Settlement with Queries
 
 Instead of settling each transaction, do monthly settlements using queries to calculate the amount.
 
