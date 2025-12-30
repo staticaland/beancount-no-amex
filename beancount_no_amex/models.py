@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from enum import Enum
-from typing import Callable
+from functools import cached_property
 import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -68,6 +68,10 @@ class AmountOperator(str, Enum):
     GTE = "gte"     # Greater than or equal
     EQ = "eq"       # Equal
     BETWEEN = "between"  # Between two values (inclusive)
+
+
+# Type alias for amount values that can be coerced to Decimal
+AmountValue = Decimal | str | int | float
 
 
 class AmountCondition(BaseModel):
@@ -138,22 +142,20 @@ class TransactionPattern(BaseModel):
     At least one of narration or amount_condition must be specified.
 
     Examples:
-        # Simple substring match (backward compatible)
+        # Simple substring match
         TransactionPattern(narration="SPOTIFY", account="Expenses:Entertainment:Music")
 
         # Regex match for narration
-        TransactionPattern(narration="REMA\\s*1000", account="Expenses:Groceries", regex=True)
+        TransactionPattern(narration=r"REMA\\s*1000", regex=True, account="Expenses:Groceries")
 
-        # Amount-only match (e.g., small purchases to petty cash)
-        TransactionPattern(
-            amount_condition=AmountCondition(operator=AmountOperator.LT, value=Decimal("50")),
-            account="Expenses:PettyCash"
-        )
+        # Using helper functions for cleaner amount conditions
+        TransactionPattern(amount_condition=amount_lt(50), account="Expenses:PettyCash")
+        TransactionPattern(amount_condition=amount_between(100, 500), account="Expenses:Medium")
 
         # Combined: specific merchant with amount range
         TransactionPattern(
             narration="VINMONOPOLET",
-            amount_condition=AmountCondition(operator=AmountOperator.GT, value=Decimal("500")),
+            amount_condition=amount_gt(500),
             account="Expenses:Entertainment:Alcohol:Expensive"
         )
     """
@@ -162,9 +164,6 @@ class TransactionPattern(BaseModel):
     case_insensitive: bool = False  # If True, narration matching is case-insensitive
     amount_condition: AmountCondition | None = None
     account: str  # Target account to categorize to
-
-    # Compiled regex pattern (cached for performance)
-    _compiled_pattern: re.Pattern | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -175,22 +174,17 @@ class TransactionPattern(BaseModel):
             raise ValueError("At least one of narration or amount_condition must be specified")
         return self
 
-    def _get_compiled_pattern(self) -> re.Pattern | None:
-        """Get or compile the regex pattern for narration matching."""
+    @cached_property
+    def _compiled_pattern(self) -> re.Pattern | None:
+        """Lazily compile and cache the regex pattern for narration matching."""
         if self.narration is None:
             return None
 
-        if self._compiled_pattern is None:
-            flags = re.IGNORECASE if self.case_insensitive else 0
-            if self.regex:
-                object.__setattr__(self, '_compiled_pattern', re.compile(self.narration, flags))
-            else:
-                # For non-regex, compile a pattern that matches the substring
-                # Escape special regex characters
-                escaped = re.escape(self.narration)
-                object.__setattr__(self, '_compiled_pattern', re.compile(escaped, flags))
-
-        return self._compiled_pattern
+        flags = re.IGNORECASE if self.case_insensitive else 0
+        if self.regex:
+            return re.compile(self.narration, flags)
+        # For non-regex, escape special characters for literal matching
+        return re.compile(re.escape(self.narration), flags)
 
     def matches(self, narration: str, amount: Decimal) -> bool:
         """Check if a transaction matches this pattern.
@@ -204,13 +198,66 @@ class TransactionPattern(BaseModel):
         """
         # Check narration condition
         if self.narration is not None:
-            pattern = self._get_compiled_pattern()
-            if pattern is None or pattern.search(narration) is None:
+            if self._compiled_pattern is None or self._compiled_pattern.search(narration) is None:
                 return False
 
         # Check amount condition
-        if self.amount_condition is not None:
-            if not self.amount_condition.matches(amount):
-                return False
+        if self.amount_condition is not None and not self.amount_condition.matches(amount):
+            return False
 
         return True
+
+
+# =============================================================================
+# Helper functions for creating AmountCondition objects (fluent API)
+# =============================================================================
+
+
+def amount_lt(value: AmountValue) -> AmountCondition:
+    """Create an AmountCondition for 'less than' comparison.
+
+    Example:
+        TransactionPattern(amount_condition=amount_lt(50), account="Expenses:Small")
+    """
+    return AmountCondition(operator=AmountOperator.LT, value=Decimal(str(value)))
+
+
+def amount_lte(value: AmountValue) -> AmountCondition:
+    """Create an AmountCondition for 'less than or equal' comparison."""
+    return AmountCondition(operator=AmountOperator.LTE, value=Decimal(str(value)))
+
+
+def amount_gt(value: AmountValue) -> AmountCondition:
+    """Create an AmountCondition for 'greater than' comparison.
+
+    Example:
+        TransactionPattern(amount_condition=amount_gt(1000), account="Expenses:Large")
+    """
+    return AmountCondition(operator=AmountOperator.GT, value=Decimal(str(value)))
+
+
+def amount_gte(value: AmountValue) -> AmountCondition:
+    """Create an AmountCondition for 'greater than or equal' comparison."""
+    return AmountCondition(operator=AmountOperator.GTE, value=Decimal(str(value)))
+
+
+def amount_eq(value: AmountValue) -> AmountCondition:
+    """Create an AmountCondition for 'equal' comparison.
+
+    Example:
+        TransactionPattern(amount_condition=amount_eq(99), account="Expenses:Subscriptions")
+    """
+    return AmountCondition(operator=AmountOperator.EQ, value=Decimal(str(value)))
+
+
+def amount_between(low: AmountValue, high: AmountValue) -> AmountCondition:
+    """Create an AmountCondition for 'between' comparison (inclusive).
+
+    Example:
+        TransactionPattern(amount_condition=amount_between(100, 500), account="Expenses:Medium")
+    """
+    return AmountCondition(
+        operator=AmountOperator.BETWEEN,
+        value=Decimal(str(low)),
+        value2=Decimal(str(high)),
+    )

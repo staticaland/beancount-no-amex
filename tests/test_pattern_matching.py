@@ -16,6 +16,12 @@ from beancount_no_amex.models import (
     AmountCondition,
     AmountOperator,
     TransactionPattern,
+    amount_between,
+    amount_eq,
+    amount_gt,
+    amount_gte,
+    amount_lt,
+    amount_lte,
 )
 
 
@@ -254,3 +260,77 @@ class TestTransactionPatternValidation:
             account="Expenses:Test",
         )
         assert pattern.amount_condition is not None
+
+
+class TestAmountHelperFunctions:
+    """Tests for the fluent API helper functions."""
+
+    def test_amount_lt(self):
+        """amount_lt creates correct AmountCondition."""
+        condition = amount_lt(100)
+        assert condition.operator == AmountOperator.LT
+        assert condition.value == Decimal("100")
+        assert condition.matches(Decimal("99")) is True
+        assert condition.matches(Decimal("100")) is False
+
+    def test_amount_lte(self):
+        """amount_lte creates correct AmountCondition."""
+        condition = amount_lte(100)
+        assert condition.operator == AmountOperator.LTE
+        assert condition.value == Decimal("100")
+        assert condition.matches(Decimal("100")) is True
+        assert condition.matches(Decimal("101")) is False
+
+    def test_amount_gt(self):
+        """amount_gt creates correct AmountCondition."""
+        condition = amount_gt(100)
+        assert condition.operator == AmountOperator.GT
+        assert condition.value == Decimal("100")
+        assert condition.matches(Decimal("101")) is True
+        assert condition.matches(Decimal("100")) is False
+
+    def test_amount_gte(self):
+        """amount_gte creates correct AmountCondition."""
+        condition = amount_gte(100)
+        assert condition.operator == AmountOperator.GTE
+        assert condition.value == Decimal("100")
+        assert condition.matches(Decimal("100")) is True
+        assert condition.matches(Decimal("99")) is False
+
+    def test_amount_eq(self):
+        """amount_eq creates correct AmountCondition."""
+        condition = amount_eq(99.99)
+        assert condition.operator == AmountOperator.EQ
+        assert condition.value == Decimal("99.99")
+        assert condition.matches(Decimal("99.99")) is True
+        assert condition.matches(Decimal("100")) is False
+
+    def test_amount_between(self):
+        """amount_between creates correct AmountCondition."""
+        condition = amount_between(50, 100)
+        assert condition.operator == AmountOperator.BETWEEN
+        assert condition.value == Decimal("50")
+        assert condition.value2 == Decimal("100")
+        assert condition.matches(Decimal("75")) is True
+        assert condition.matches(Decimal("49")) is False
+
+    def test_helpers_accept_various_types(self):
+        """Helper functions accept int, float, string, and Decimal."""
+        # Integer
+        assert amount_lt(100).value == Decimal("100")
+        # Float
+        assert amount_lt(99.99).value == Decimal("99.99")
+        # String
+        assert amount_lt("50.50").value == Decimal("50.50")
+        # Decimal
+        assert amount_lt(Decimal("25")).value == Decimal("25")
+
+    def test_helpers_in_transaction_pattern(self):
+        """Helper functions work seamlessly with TransactionPattern."""
+        pattern = TransactionPattern(
+            narration="TEST",
+            amount_condition=amount_gt(500),
+            account="Expenses:Large",
+        )
+        assert pattern.matches("TEST MERCHANT", Decimal("600")) is True
+        assert pattern.matches("TEST MERCHANT", Decimal("400")) is False
