@@ -16,12 +16,7 @@ from beancount_no_amex.models import (
     AmountCondition,
     AmountOperator,
     TransactionPattern,
-    amount_between,
-    amount_eq,
-    amount_gt,
-    amount_gte,
-    amount_lt,
-    amount_lte,
+    amount,
 )
 
 
@@ -262,75 +257,88 @@ class TestTransactionPatternValidation:
         assert pattern.amount_condition is not None
 
 
-class TestAmountHelperFunctions:
-    """Tests for the fluent API helper functions."""
+class TestAmountProxy:
+    """Tests for the amount proxy with natural comparison syntax."""
 
-    def test_amount_lt(self):
-        """amount_lt creates correct AmountCondition."""
-        condition = amount_lt(100)
+    def test_less_than(self):
+        """amount < value creates correct AmountCondition."""
+        condition = amount < 100
         assert condition.operator == AmountOperator.LT
         assert condition.value == Decimal("100")
         assert condition.matches(Decimal("99")) is True
         assert condition.matches(Decimal("100")) is False
 
-    def test_amount_lte(self):
-        """amount_lte creates correct AmountCondition."""
-        condition = amount_lte(100)
+    def test_less_than_or_equal(self):
+        """amount <= value creates correct AmountCondition."""
+        condition = amount <= 100
         assert condition.operator == AmountOperator.LTE
         assert condition.value == Decimal("100")
         assert condition.matches(Decimal("100")) is True
         assert condition.matches(Decimal("101")) is False
 
-    def test_amount_gt(self):
-        """amount_gt creates correct AmountCondition."""
-        condition = amount_gt(100)
+    def test_greater_than(self):
+        """amount > value creates correct AmountCondition."""
+        condition = amount > 100
         assert condition.operator == AmountOperator.GT
         assert condition.value == Decimal("100")
         assert condition.matches(Decimal("101")) is True
         assert condition.matches(Decimal("100")) is False
 
-    def test_amount_gte(self):
-        """amount_gte creates correct AmountCondition."""
-        condition = amount_gte(100)
+    def test_greater_than_or_equal(self):
+        """amount >= value creates correct AmountCondition."""
+        condition = amount >= 100
         assert condition.operator == AmountOperator.GTE
         assert condition.value == Decimal("100")
         assert condition.matches(Decimal("100")) is True
         assert condition.matches(Decimal("99")) is False
 
-    def test_amount_eq(self):
-        """amount_eq creates correct AmountCondition."""
-        condition = amount_eq(99.99)
+    def test_equal(self):
+        """amount == value creates correct AmountCondition."""
+        condition = amount == 99.99
         assert condition.operator == AmountOperator.EQ
         assert condition.value == Decimal("99.99")
         assert condition.matches(Decimal("99.99")) is True
         assert condition.matches(Decimal("100")) is False
 
-    def test_amount_between(self):
-        """amount_between creates correct AmountCondition."""
-        condition = amount_between(50, 100)
+    def test_between(self):
+        """amount.between(low, high) creates correct AmountCondition."""
+        condition = amount.between(50, 100)
         assert condition.operator == AmountOperator.BETWEEN
         assert condition.value == Decimal("50")
         assert condition.value2 == Decimal("100")
         assert condition.matches(Decimal("75")) is True
         assert condition.matches(Decimal("49")) is False
 
-    def test_helpers_accept_various_types(self):
-        """Helper functions accept int, float, string, and Decimal."""
+    def test_accepts_various_types(self):
+        """Amount proxy accepts int, float, string, and Decimal."""
         # Integer
-        assert amount_lt(100).value == Decimal("100")
+        assert (amount < 100).value == Decimal("100")
         # Float
-        assert amount_lt(99.99).value == Decimal("99.99")
+        assert (amount < 99.99).value == Decimal("99.99")
         # String
-        assert amount_lt("50.50").value == Decimal("50.50")
+        assert (amount < "50.50").value == Decimal("50.50")
         # Decimal
-        assert amount_lt(Decimal("25")).value == Decimal("25")
+        assert (amount < Decimal("25")).value == Decimal("25")
 
-    def test_helpers_in_transaction_pattern(self):
-        """Helper functions work seamlessly with TransactionPattern."""
+    def test_in_transaction_pattern(self):
+        """Amount proxy works seamlessly with TransactionPattern."""
         pattern = TransactionPattern(
             narration="TEST",
-            amount_condition=amount_gt(500),
+            amount_condition=amount > 500,
             account="Expenses:Large",
         )
         assert pattern.matches("TEST MERCHANT", Decimal("600")) is True
         assert pattern.matches("TEST MERCHANT", Decimal("400")) is False
+
+    def test_all_operators_in_patterns(self):
+        """All comparison operators work in TransactionPattern."""
+        patterns = [
+            TransactionPattern(amount_condition=amount < 50, account="A"),
+            TransactionPattern(amount_condition=amount <= 50, account="B"),
+            TransactionPattern(amount_condition=amount > 50, account="C"),
+            TransactionPattern(amount_condition=amount >= 50, account="D"),
+            TransactionPattern(amount_condition=amount == 50, account="E"),
+            TransactionPattern(amount_condition=amount.between(40, 60), account="F"),
+        ]
+        # Just verify they all construct without error
+        assert len(patterns) == 6

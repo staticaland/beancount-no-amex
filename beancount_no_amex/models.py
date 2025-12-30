@@ -209,55 +209,57 @@ class TransactionPattern(BaseModel):
 
 
 # =============================================================================
-# Helper functions for creating AmountCondition objects (fluent API)
+# Amount proxy for natural comparison syntax
 # =============================================================================
 
 
-def amount_lt(value: AmountValue) -> AmountCondition:
-    """Create an AmountCondition for 'less than' comparison.
+class _AmountProxy:
+    """Proxy object that captures comparison operators to build AmountCondition.
+
+    This enables natural Python syntax for amount conditions:
+        amount < 100      # Less than 100
+        amount <= 100     # Less than or equal to 100
+        amount > 500      # Greater than 500
+        amount >= 500     # Greater than or equal to 500
+        amount == 99      # Exactly 99
+        amount.between(100, 500)  # Between 100 and 500 (inclusive)
 
     Example:
-        TransactionPattern(amount_condition=amount_lt(50), account="Expenses:Small")
+        from beancount_no_amex import TransactionPattern, amount
+
+        TransactionPattern(
+            amount_condition=amount < 50,
+            account="Expenses:PettyCash"
+        )
     """
-    return AmountCondition(operator=AmountOperator.LT, value=Decimal(str(value)))
+
+    def __lt__(self, other: AmountValue) -> AmountCondition:
+        return AmountCondition(operator=AmountOperator.LT, value=Decimal(str(other)))
+
+    def __le__(self, other: AmountValue) -> AmountCondition:
+        return AmountCondition(operator=AmountOperator.LTE, value=Decimal(str(other)))
+
+    def __gt__(self, other: AmountValue) -> AmountCondition:
+        return AmountCondition(operator=AmountOperator.GT, value=Decimal(str(other)))
+
+    def __ge__(self, other: AmountValue) -> AmountCondition:
+        return AmountCondition(operator=AmountOperator.GTE, value=Decimal(str(other)))
+
+    def __eq__(self, other: AmountValue) -> AmountCondition:  # type: ignore[override]
+        return AmountCondition(operator=AmountOperator.EQ, value=Decimal(str(other)))
+
+    def between(self, low: AmountValue, high: AmountValue) -> AmountCondition:
+        """Create a 'between' condition (inclusive).
+
+        Example:
+            amount.between(100, 500)  # Matches 100, 250, 500, but not 99 or 501
+        """
+        return AmountCondition(
+            operator=AmountOperator.BETWEEN,
+            value=Decimal(str(low)),
+            value2=Decimal(str(high)),
+        )
 
 
-def amount_lte(value: AmountValue) -> AmountCondition:
-    """Create an AmountCondition for 'less than or equal' comparison."""
-    return AmountCondition(operator=AmountOperator.LTE, value=Decimal(str(value)))
-
-
-def amount_gt(value: AmountValue) -> AmountCondition:
-    """Create an AmountCondition for 'greater than' comparison.
-
-    Example:
-        TransactionPattern(amount_condition=amount_gt(1000), account="Expenses:Large")
-    """
-    return AmountCondition(operator=AmountOperator.GT, value=Decimal(str(value)))
-
-
-def amount_gte(value: AmountValue) -> AmountCondition:
-    """Create an AmountCondition for 'greater than or equal' comparison."""
-    return AmountCondition(operator=AmountOperator.GTE, value=Decimal(str(value)))
-
-
-def amount_eq(value: AmountValue) -> AmountCondition:
-    """Create an AmountCondition for 'equal' comparison.
-
-    Example:
-        TransactionPattern(amount_condition=amount_eq(99), account="Expenses:Subscriptions")
-    """
-    return AmountCondition(operator=AmountOperator.EQ, value=Decimal(str(value)))
-
-
-def amount_between(low: AmountValue, high: AmountValue) -> AmountCondition:
-    """Create an AmountCondition for 'between' comparison (inclusive).
-
-    Example:
-        TransactionPattern(amount_condition=amount_between(100, 500), account="Expenses:Medium")
-    """
-    return AmountCondition(
-        operator=AmountOperator.BETWEEN,
-        value=Decimal(str(low)),
-        value2=Decimal(str(high)),
-    )
+# Singleton instance - import this for natural syntax
+amount = _AmountProxy()
