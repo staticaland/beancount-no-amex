@@ -167,6 +167,16 @@ def basic_config() -> AmexAccountConfig:
 
 
 @pytest.fixture
+def config_with_balance_assertions() -> AmexAccountConfig:
+    """Configuration with balance assertions enabled."""
+    return AmexAccountConfig(
+        account_name="Liabilities:CreditCard:Amex",
+        currency="NOK",
+        generate_balance_assertions=True,
+    )
+
+
+@pytest.fixture
 def config_with_mappings() -> AmexAccountConfig:
     """Configuration with transaction patterns for categorization."""
     return AmexAccountConfig(
@@ -227,6 +237,12 @@ def config_with_patterns() -> AmexAccountConfig:
 def basic_importer(basic_config) -> Importer:
     """An importer with basic configuration."""
     return Importer(config=basic_config, debug=False)
+
+
+@pytest.fixture
+def importer_with_balance_assertions(config_with_balance_assertions) -> Importer:
+    """An importer configured to generate balance assertions."""
+    return Importer(config=config_with_balance_assertions, debug=False)
 
 
 @pytest.fixture
