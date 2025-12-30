@@ -19,7 +19,7 @@ uv init
 
 ```bash
 # Add core dependencies
-uv add "beancount>=3.1.0" fava
+uv add beancount fava
 
 # Add git-based dependencies
 uv add beangulp --git https://github.com/beancount/beangulp
