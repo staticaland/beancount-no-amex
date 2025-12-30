@@ -38,11 +38,14 @@ class AmexAccountConfig:
                     When set, the importer will only match files with this exact ACCTID.
                     When None, the importer matches any Amex QBO file.
         narration_to_account_mappings: List of (pattern, account) tuples for auto-categorization.
+        skip_deduplication: When True, skip FITID-based deduplication (default: False).
+                           Useful for forcing re-import of transactions.
     """
     account_name: str
     currency: str
     account_id: str | None = None
     narration_to_account_mappings: list[tuple[str, str]] = field(default_factory=list)
+    skip_deduplication: bool = False
 
 
 def parse_ofx_time(date_str: str) -> datetime.datetime:
@@ -126,6 +129,7 @@ class Importer(beangulp.Importer):
         self.currency = config.currency  # Store configured currency
         self.account_id = config.account_id  # Optional account ID for matching
         self.narration_to_account_mappings = config.narration_to_account_mappings
+        self.skip_deduplication = config.skip_deduplication
         self.flag = flag
         self.debug = debug
 
@@ -232,6 +236,27 @@ class Importer(beangulp.Importer):
         # Default currency should never be None, but use DEFAULT_CURRENCY as fallback
         return self.currency or DEFAULT_CURRENCY
 
+    def _extract_existing_fitids(self, existing_entries: list[data.Directive]) -> set[str]:
+        """Extract all FITIDs from existing entries for deduplication.
+
+        Scans the existing ledger entries for transactions that have an 'id'
+        metadata field (containing the FITID) and returns them as a set for
+        efficient lookup during import.
+
+        Args:
+            existing_entries: List of existing Beancount directives from the ledger.
+
+        Returns:
+            Set of FITID strings found in existing transactions.
+        """
+        existing_fitids: set[str] = set()
+        for entry in existing_entries:
+            if isinstance(entry, data.Transaction):
+                fitid = entry.meta.get("id")
+                if fitid:
+                    existing_fitids.add(fitid)
+        return existing_fitids
+
     def identify(self, filepath: str) -> bool:
         """Check if the file is an American Express QBO statement.
 
@@ -337,12 +362,18 @@ class Importer(beangulp.Importer):
         Currency is determined by first checking the QBO file, and falling back
         to the currency specified in the importer configuration.
 
+        Deduplication is performed using FITID (Financial Transaction ID) matching.
+        Transactions with FITIDs that already exist in the ledger are skipped.
+        This can be disabled by setting skip_deduplication=True in the config.
+
         Args:
             filepath: Path to the QBO file
-            existing_entries: Existing directives (used for potential deduplication)
+            existing_entries: Existing directives from the ledger, used for
+                             FITID-based deduplication.
 
         Returns:
-            List of extracted Beancount directives (Transactions and Balance).
+            List of extracted Beancount directives (Transactions and Balance),
+            excluding any duplicates found in existing_entries.
         """
         entries = []
 
@@ -356,7 +387,15 @@ class Importer(beangulp.Importer):
         # 2. Determine the currency to use
         currency = self._determine_currency(qbo_data.currency)
 
-        # 3. Process each raw transaction
+        # 3. Extract existing FITIDs for deduplication
+        existing_fitids: set[str] = set()
+        skipped_duplicates = 0
+        if not self.skip_deduplication:
+            existing_fitids = self._extract_existing_fitids(existing_entries)
+            if self.debug and existing_fitids:
+                print(f"Found {len(existing_fitids)} existing FITIDs for deduplication")
+
+        # 4. Process each raw transaction
         for idx, raw_txn in enumerate(qbo_data.transactions, 1):
             try:
                 # 3a. Validate and parse essential raw data
@@ -371,6 +410,13 @@ class Importer(beangulp.Importer):
                 memo = raw_txn.memo or ""
                 txn_id = raw_txn.id
                 txn_type = raw_txn.type
+
+                # 4a. Check for duplicate FITID
+                if txn_id and txn_id in existing_fitids:
+                    skipped_duplicates += 1
+                    if self.debug:
+                        print(f"Skipping duplicate transaction {idx} (FITID: {txn_id})")
+                    continue
 
                 # Use payee as narration, fallback to memo if payee is missing
                 narration = payee or memo
@@ -460,10 +506,9 @@ class Importer(beangulp.Importer):
                  if self.debug:
                      print(f"Could not create balance assertion for {filepath}: {e}")
 
-        # (Optional: Add deduplication logic here if needed in the future)
-        # from beangulp import extract, similar
-        # comparator = similar.heuristic_comparator(...)
-        # extract.mark_duplicate_entries(entries, existing_entries, ...)
+        # 6. Report deduplication results
+        if self.debug and skipped_duplicates > 0:
+            print(f"Deduplication: skipped {skipped_duplicates} duplicate transaction(s)")
 
         return entries
 
