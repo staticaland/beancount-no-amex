@@ -2,6 +2,7 @@ from .credit import AmexAccountConfig, Importer  # noqa: F401
 
 # Classification components (generic, reusable across importers)
 from .classify import (
+    AccountSplit,
     AmountCondition,
     AmountOperator,
     ClassifierMixin,
@@ -23,6 +24,7 @@ __all__ = [
     "AmexAccountConfig",
     "Importer",
     # Classification (generic, reusable)
+    "AccountSplit",
     "AmountCondition",
     "AmountOperator",
     "ClassifierMixin",

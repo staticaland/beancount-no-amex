@@ -13,8 +13,10 @@ import pytest
 from pydantic import ValidationError
 
 from beancount_no_amex.classify import (
+    AccountSplit,
     AmountCondition,
     AmountOperator,
+    TransactionClassifier,
     TransactionPattern,
     amount,
 )
@@ -342,3 +344,255 @@ class TestAmountProxy:
         ]
         # Just verify they all construct without error
         assert len(patterns) == 6
+
+
+class TestAccountSplit:
+    """Tests for AccountSplit model."""
+
+    def test_create_split(self):
+        """Basic AccountSplit creation."""
+        split = AccountSplit(account="Expenses:Groceries", percentage=Decimal("80"))
+        assert split.account == "Expenses:Groceries"
+        assert split.percentage == Decimal("80")
+
+    def test_percentage_coercion_from_int(self):
+        """Percentage can be specified as int."""
+        split = AccountSplit(account="Expenses:Test", percentage=50)
+        assert split.percentage == Decimal("50")
+
+    def test_percentage_coercion_from_float(self):
+        """Percentage can be specified as float."""
+        split = AccountSplit(account="Expenses:Test", percentage=33.33)
+        assert split.percentage == Decimal("33.33")
+
+    def test_percentage_coercion_from_string(self):
+        """Percentage can be specified as string."""
+        split = AccountSplit(account="Expenses:Test", percentage="25.5")
+        assert split.percentage == Decimal("25.5")
+
+    def test_percentage_must_be_between_0_and_100(self):
+        """Percentage must be in valid range."""
+        with pytest.raises(ValidationError):
+            AccountSplit(account="Expenses:Test", percentage=-10)
+        with pytest.raises(ValidationError):
+            AccountSplit(account="Expenses:Test", percentage=101)
+
+    def test_percentage_boundary_values(self):
+        """Percentage can be exactly 0 or 100."""
+        split_zero = AccountSplit(account="A", percentage=0)
+        assert split_zero.percentage == Decimal("0")
+        split_hundred = AccountSplit(account="B", percentage=100)
+        assert split_hundred.percentage == Decimal("100")
+
+
+class TestTransactionPatternSplits:
+    """Tests for TransactionPattern with splits."""
+
+    def test_pattern_with_splits(self):
+        """Pattern can specify multiple account splits."""
+        pattern = TransactionPattern(
+            narration="COSTCO",
+            splits=[
+                AccountSplit(account="Expenses:Groceries", percentage=80),
+                AccountSplit(account="Expenses:Household", percentage=20),
+            ]
+        )
+        assert len(pattern.splits) == 2
+        assert pattern.splits[0].account == "Expenses:Groceries"
+        assert pattern.splits[0].percentage == Decimal("80")
+
+    def test_pattern_must_have_account_or_splits(self):
+        """Pattern must specify either account or splits."""
+        with pytest.raises(ValidationError):
+            TransactionPattern(narration="TEST")
+
+    def test_pattern_cannot_have_both_account_and_splits(self):
+        """Pattern cannot specify both account and splits."""
+        with pytest.raises(ValidationError):
+            TransactionPattern(
+                narration="TEST",
+                account="Expenses:Test",
+                splits=[AccountSplit(account="Expenses:Other", percentage=100)],
+            )
+
+    def test_splits_percentage_cannot_exceed_100(self):
+        """Split percentages cannot sum to more than 100."""
+        with pytest.raises(ValidationError):
+            TransactionPattern(
+                narration="TEST",
+                splits=[
+                    AccountSplit(account="A", percentage=60),
+                    AccountSplit(account="B", percentage=50),
+                ],
+            )
+
+    def test_splits_percentage_can_be_less_than_100(self):
+        """Split percentages can sum to less than 100 (remainder unallocated)."""
+        pattern = TransactionPattern(
+            narration="TEST",
+            splits=[
+                AccountSplit(account="A", percentage=40),
+                AccountSplit(account="B", percentage=30),
+            ],
+        )
+        total = sum(s.percentage for s in pattern.splits)
+        assert total == Decimal("70")
+
+    def test_get_splits_for_single_account(self):
+        """get_splits() returns 100% split for single account pattern."""
+        pattern = TransactionPattern(narration="TEST", account="Expenses:Test")
+        splits = pattern.get_splits()
+        assert len(splits) == 1
+        assert splits[0].account == "Expenses:Test"
+        assert splits[0].percentage == Decimal("100")
+
+    def test_get_splits_for_multi_account(self):
+        """get_splits() returns configured splits for split pattern."""
+        pattern = TransactionPattern(
+            narration="TEST",
+            splits=[
+                AccountSplit(account="A", percentage=70),
+                AccountSplit(account="B", percentage=30),
+            ],
+        )
+        splits = pattern.get_splits()
+        assert len(splits) == 2
+        assert splits[0].account == "A"
+        assert splits[1].account == "B"
+
+
+class TestTransactionClassifierDefaults:
+    """Tests for TransactionClassifier with default account and split percentage."""
+
+    def test_default_account_for_unmatched(self):
+        """Unmatched transactions go to default_account."""
+        patterns = [
+            TransactionPattern(narration="SPOTIFY", account="Expenses:Music")
+        ]
+        classifier = TransactionClassifier(
+            patterns,
+            default_account="Expenses:Uncategorized",
+        )
+        # Matched transaction
+        result = classifier.classify("SPOTIFY PREMIUM", Decimal("100"))
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].account == "Expenses:Music"
+
+        # Unmatched transaction goes to default
+        result = classifier.classify("RANDOM MERCHANT", Decimal("100"))
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].account == "Expenses:Uncategorized"
+        assert result[0].percentage == Decimal("100")
+
+    def test_no_default_account_returns_none_for_unmatched(self):
+        """Without default_account, unmatched transactions return None."""
+        patterns = [
+            TransactionPattern(narration="SPOTIFY", account="Expenses:Music")
+        ]
+        classifier = TransactionClassifier(patterns)
+        result = classifier.classify("RANDOM MERCHANT", Decimal("100"))
+        assert result is None
+
+    def test_default_split_percentage_splits_matched(self):
+        """default_split_percentage splits matched transactions."""
+        patterns = [
+            TransactionPattern(narration="SPOTIFY", account="Expenses:Music")
+        ]
+        classifier = TransactionClassifier(
+            patterns,
+            default_account="Expenses:NeedsReview",
+            default_split_percentage=Decimal("50"),
+        )
+        result = classifier.classify("SPOTIFY PREMIUM", Decimal("9.99"))
+        assert result is not None
+        assert len(result) == 2
+        # 50% to matched account
+        assert result[0].account == "Expenses:Music"
+        assert result[0].percentage == Decimal("50")
+        # 50% to default/review account
+        assert result[1].account == "Expenses:NeedsReview"
+        assert result[1].percentage == Decimal("50")
+
+    def test_default_split_percentage_with_pattern_splits(self):
+        """default_split_percentage works with pattern that has splits."""
+        patterns = [
+            TransactionPattern(
+                narration="COSTCO",
+                splits=[
+                    AccountSplit(account="Expenses:Groceries", percentage=80),
+                    AccountSplit(account="Expenses:Household", percentage=20),
+                ],
+            )
+        ]
+        classifier = TransactionClassifier(
+            patterns,
+            default_account="Expenses:NeedsReview",
+            default_split_percentage=Decimal("50"),
+        )
+        result = classifier.classify("COSTCO WHOLESALE", Decimal("200"))
+        assert result is not None
+        assert len(result) == 3
+        # Pattern splits are scaled by (100 - 50) / 100 = 0.5
+        # 80% * 0.5 = 40%
+        assert result[0].account == "Expenses:Groceries"
+        assert result[0].percentage == Decimal("40")
+        # 20% * 0.5 = 10%
+        assert result[1].account == "Expenses:Household"
+        assert result[1].percentage == Decimal("10")
+        # 50% to review
+        assert result[2].account == "Expenses:NeedsReview"
+        assert result[2].percentage == Decimal("50")
+
+    def test_default_split_percentage_requires_default_account(self):
+        """default_split_percentage requires default_account to be set."""
+        with pytest.raises(ValueError):
+            TransactionClassifier(
+                [],
+                default_split_percentage=Decimal("50"),
+            )
+
+    def test_zero_default_split_percentage(self):
+        """default_split_percentage of 0 means 100% to matched account."""
+        patterns = [
+            TransactionPattern(narration="SPOTIFY", account="Expenses:Music")
+        ]
+        classifier = TransactionClassifier(
+            patterns,
+            default_account="Expenses:NeedsReview",
+            default_split_percentage=Decimal("0"),
+        )
+        result = classifier.classify("SPOTIFY PREMIUM", Decimal("9.99"))
+        assert len(result) == 2
+        # 100% to matched
+        assert result[0].percentage == Decimal("100")
+        # 0% to review
+        assert result[1].percentage == Decimal("0")
+
+    def test_hundred_default_split_percentage(self):
+        """default_split_percentage of 100 means 0% to matched, 100% to review."""
+        patterns = [
+            TransactionPattern(narration="SPOTIFY", account="Expenses:Music")
+        ]
+        classifier = TransactionClassifier(
+            patterns,
+            default_account="Expenses:NeedsReview",
+            default_split_percentage=Decimal("100"),
+        )
+        result = classifier.classify("SPOTIFY PREMIUM", Decimal("9.99"))
+        assert len(result) == 2
+        # 0% to matched
+        assert result[0].percentage == Decimal("0")
+        # 100% to review
+        assert result[1].percentage == Decimal("100")
+
+    def test_classify_returns_list_of_splits(self):
+        """classify() returns list of AccountSplit objects."""
+        patterns = [
+            TransactionPattern(narration="TEST", account="Expenses:Test")
+        ]
+        classifier = TransactionClassifier(patterns)
+        result = classifier.classify("TEST MERCHANT", Decimal("100"))
+        assert isinstance(result, list)
+        assert all(isinstance(s, AccountSplit) for s in result)

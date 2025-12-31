@@ -58,6 +58,31 @@ class AmountOperator(str, Enum):
 AmountValue = Decimal | str | int | float
 
 
+class AccountSplit(BaseModel):
+    """A single account with its percentage of the transaction.
+
+    Used in TransactionPattern to split a transaction across multiple accounts.
+
+    Example:
+        AccountSplit(account="Expenses:Groceries", percentage=80)
+        AccountSplit(account="Expenses:Household", percentage=20)
+
+    Note: Percentages should be between 0 and 100 (not 0 and 1).
+    """
+    account: str
+    percentage: Decimal
+
+    @field_validator('percentage', mode='before')
+    @classmethod
+    def validate_percentage(cls, v):
+        """Ensure percentage is a valid decimal between 0 and 100."""
+        # Convert via string to preserve precision for floats
+        val = Decimal(str(v)) if isinstance(v, (str, int, float)) else v
+        if val < 0 or val > 100:
+            raise ValueError("percentage must be between 0 and 100")
+        return val
+
+
 class AmountCondition(BaseModel):
     """Condition for matching transaction amounts.
 
@@ -124,6 +149,7 @@ class TransactionPattern(BaseModel):
     - If amount_condition is specified, the amount must satisfy it
 
     At least one of narration or amount_condition must be specified.
+    Either account (single) or splits (multiple accounts) must be specified.
 
     Examples:
         # Simple substring match
@@ -142,21 +168,56 @@ class TransactionPattern(BaseModel):
             amount_condition=amount > 500,
             account="Expenses:Entertainment:Alcohol:Expensive"
         )
+
+        # Split transaction across multiple accounts
+        TransactionPattern(
+            narration="COSTCO",
+            splits=[
+                AccountSplit(account="Expenses:Groceries", percentage=80),
+                AccountSplit(account="Expenses:Household", percentage=20),
+            ]
+        )
     """
     narration: str | None = None
     regex: bool = False  # If True, narration is treated as a regex pattern
     case_insensitive: bool = False  # If True, narration matching is case-insensitive
     amount_condition: AmountCondition | None = None
-    account: str  # Target account to categorize to
+    account: str | None = None  # Target account (single), mutually exclusive with splits
+    splits: list[AccountSplit] | None = None  # Split across multiple accounts
 
     model_config = {"arbitrary_types_allowed": True}
 
     @model_validator(mode='after')
-    def validate_has_condition(self):
-        """Ensure at least one matching condition is specified."""
+    def validate_pattern(self):
+        """Validate pattern configuration."""
+        # Must have at least one matching condition
         if self.narration is None and self.amount_condition is None:
             raise ValueError("At least one of narration or amount_condition must be specified")
+
+        # Must have exactly one of account or splits
+        if self.account is None and self.splits is None:
+            raise ValueError("Either account or splits must be specified")
+        if self.account is not None and self.splits is not None:
+            raise ValueError("Cannot specify both account and splits")
+
+        # Validate splits percentages sum to <= 100
+        if self.splits is not None:
+            total = sum(s.percentage for s in self.splits)
+            if total > 100:
+                raise ValueError(f"Split percentages sum to {total}, must be <= 100")
+
         return self
+
+    def get_splits(self) -> list[AccountSplit]:
+        """Get the account splits for this pattern.
+
+        Returns a list of AccountSplit objects. For single account patterns,
+        returns a single split with 100% to that account.
+        """
+        if self.splits is not None:
+            return self.splits
+        # Single account = 100% to that account
+        return [AccountSplit(account=self.account, percentage=Decimal("100"))]
 
     @cached_property
     def _compiled_pattern(self) -> re.Pattern | None:
@@ -261,33 +322,101 @@ class TransactionClassifier:
 
     Example:
         classifier = TransactionClassifier(patterns)
-        account = classifier.classify("SPOTIFY PREMIUM", Decimal("-9.99"))
-        if account:
-            print(f"Matched: {account}")
+        splits = classifier.classify("SPOTIFY PREMIUM", Decimal("-9.99"))
+        if splits:
+            for account, percentage in splits:
+                print(f"  {percentage}% -> {account}")
+
+        # With default account for unmatched transactions
+        classifier = TransactionClassifier(
+            patterns,
+            default_account="Expenses:Uncategorized"
+        )
+
+        # With default split percentage (for review workflow)
+        # Matched transactions split between matched account and default
+        classifier = TransactionClassifier(
+            patterns,
+            default_account="Expenses:NeedsReview",
+            default_split_percentage=Decimal("50")  # 50% confident
+        )
     """
 
-    def __init__(self, patterns: list[TransactionPattern]):
-        """Initialize the classifier with a list of patterns.
+    def __init__(
+        self,
+        patterns: list[TransactionPattern],
+        default_account: str | None = None,
+        default_split_percentage: Decimal | None = None,
+    ):
+        """Initialize the classifier with patterns and optional defaults.
 
         Args:
             patterns: List of TransactionPattern objects. Patterns are evaluated
                      in order; the first match wins.
+            default_account: Account for unmatched transactions. When set,
+                           unmatched transactions go 100% to this account.
+            default_split_percentage: When set (0-100), matched transactions are
+                           split: (100 - this value)% to matched account(s),
+                           this value % to default_account. Requires default_account.
+                           Set to None to disable (default).
         """
         self.patterns = patterns
+        self.default_account = default_account
+        self.default_split_percentage = default_split_percentage
 
-    def classify(self, narration: str, amount: Decimal) -> str | None:
-        """Find the matching account for a transaction.
+        # Validate: default_split_percentage requires default_account
+        if default_split_percentage is not None and default_account is None:
+            raise ValueError("default_split_percentage requires default_account to be set")
+
+    def classify(self, narration: str, amount: Decimal) -> list[AccountSplit] | None:
+        """Find the matching account(s) for a transaction.
 
         Args:
             narration: The transaction narration/description
             amount: The transaction amount
 
         Returns:
-            The target account from the first matching pattern, or None if no match
+            A list of AccountSplit objects representing how to split the transaction,
+            or None if no match and no default_account is configured.
+
+            When default_split_percentage is set, matched transactions are split
+            between the matched account(s) and default_account.
         """
+        # Find matching pattern
+        matched_pattern = None
         for pattern in self.patterns:
             if pattern.matches(narration, amount):
-                return pattern.account
+                matched_pattern = pattern
+                break
+
+        if matched_pattern is not None:
+            # Get the pattern's splits
+            splits = matched_pattern.get_splits()
+
+            # Apply default_split_percentage if configured
+            if self.default_split_percentage is not None:
+                # Scale down the matched splits
+                scale_factor = (Decimal("100") - self.default_split_percentage) / Decimal("100")
+                scaled_splits = [
+                    AccountSplit(
+                        account=s.account,
+                        percentage=s.percentage * scale_factor
+                    )
+                    for s in splits
+                ]
+                # Add remainder to default_account
+                scaled_splits.append(AccountSplit(
+                    account=self.default_account,
+                    percentage=self.default_split_percentage
+                ))
+                return scaled_splits
+
+            return splits
+
+        # No match - use default_account if configured
+        if self.default_account is not None:
+            return [AccountSplit(account=self.default_account, percentage=Decimal("100"))]
+
         return None
 
     def add_balancing_posting(
@@ -295,9 +424,10 @@ class TransactionClassifier:
         txn: data.Transaction,
         account: str,
     ) -> data.Transaction:
-        """Add a balancing posting to a transaction.
+        """Add a balancing posting to a transaction (single account).
 
         Creates a posting with the opposite amount to balance the transaction.
+        For backwards compatibility - prefer add_balancing_postings for splits.
 
         Args:
             txn: The transaction to modify (must have at least one posting)
@@ -306,18 +436,50 @@ class TransactionClassifier:
         Returns:
             A new transaction with the balancing posting added
         """
-        if not txn.postings:
+        return self.add_balancing_postings(
+            txn,
+            [AccountSplit(account=account, percentage=Decimal("100"))]
+        )
+
+    def add_balancing_postings(
+        self,
+        txn: data.Transaction,
+        splits: list[AccountSplit],
+    ) -> data.Transaction:
+        """Add balancing postings to a transaction based on splits.
+
+        Creates postings with opposite amounts proportional to each split's
+        percentage to balance the transaction.
+
+        Args:
+            txn: The transaction to modify (must have at least one posting)
+            splits: List of AccountSplit objects defining how to split the balance
+
+        Returns:
+            A new transaction with the balancing postings added
+        """
+        if not txn.postings or not splits:
             return txn
 
         primary_posting = txn.postings[0]
-        opposite_units = Amount(
-            -primary_posting.units.number,
-            primary_posting.units.currency
-        )
-        balancing_posting = data.Posting(
-            account, opposite_units, None, None, None, None
-        )
-        return txn._replace(postings=txn.postings + [balancing_posting])
+        primary_amount = primary_posting.units.number
+        currency = primary_posting.units.currency
+
+        new_postings = list(txn.postings)
+
+        for split in splits:
+            # Calculate this split's portion of the opposite amount
+            portion = split.percentage / Decimal("100")
+            split_amount = -primary_amount * portion
+
+            balancing_posting = data.Posting(
+                split.account,
+                Amount(split_amount, currency),
+                None, None, None, None
+            )
+            new_postings.append(balancing_posting)
+
+        return txn._replace(postings=new_postings)
 
 
 # =============================================================================
@@ -332,12 +494,15 @@ class ClassifierMixin:
     categorization based on patterns.
 
     Your importer class must have a `transaction_patterns` attribute
-    (list of TransactionPattern objects).
+    (list of TransactionPattern objects). Optionally, you can also set
+    `default_account` and `default_split_percentage` attributes.
 
     Example:
         class MyImporter(ClassifierMixin, beangulp.Importer):
             def __init__(self, config):
                 self.transaction_patterns = config.transaction_patterns
+                self.default_account = config.default_account
+                self.default_split_percentage = config.default_split_percentage
                 # ... rest of your setup
 
             def extract(self, filepath, existing):
@@ -346,8 +511,10 @@ class ClassifierMixin:
                 ...
     """
 
-    # This attribute should be set by the importer class
+    # These attributes should be set by the importer class
     transaction_patterns: list[TransactionPattern]
+    default_account: str | None = None
+    default_split_percentage: Decimal | None = None
 
     def finalize(self, txn: data.Transaction, row: Any) -> data.Transaction | None:
         """Post-process the transaction with categorization based on patterns.
@@ -359,18 +526,31 @@ class ClassifierMixin:
             row: The original source data (format-specific, passed through)
 
         Returns:
-            The transaction with a balancing posting added if a pattern matched,
-            or the original transaction unchanged if no match.
+            The transaction with balancing posting(s) added based on classification,
+            or the original transaction unchanged if no match and no default.
             Return None to skip/drop the transaction.
         """
-        if not txn.postings or not self.transaction_patterns:
+        if not txn.postings:
             return txn
 
-        classifier = TransactionClassifier(self.transaction_patterns)
+        # Get optional attributes with defaults
+        default_account = getattr(self, 'default_account', None)
+        default_split_percentage = getattr(self, 'default_split_percentage', None)
+        patterns = getattr(self, 'transaction_patterns', [])
+
+        # If no patterns and no default, return unchanged
+        if not patterns and default_account is None:
+            return txn
+
+        classifier = TransactionClassifier(
+            patterns,
+            default_account=default_account,
+            default_split_percentage=default_split_percentage,
+        )
         narration = txn.narration or ""
         txn_amount = txn.postings[0].units.number
 
-        if account := classifier.classify(narration, txn_amount):
-            return classifier.add_balancing_posting(txn, account)
+        if splits := classifier.classify(narration, txn_amount):
+            return classifier.add_balancing_postings(txn, splits)
 
         return txn
