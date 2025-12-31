@@ -216,6 +216,122 @@ def get_importers():
     ]
 ```
 
+### Splitting Transactions
+
+When you pay for something that should be split with a partner, roommate, or friend, there are several strategies for tracking who owes what.
+
+#### Strategy 1: Receivables Account (Recommended)
+
+Create accounts to track what others owe you and to offset your expenses:
+
+```beancount
+; In main.beancount
+2020-01-01 open Assets:Receivables:Alex NOK
+2020-01-01 open Income:Reimbursements NOK
+```
+
+When you pay for a shared expense, use four postings to preserve full household visibility:
+
+```beancount
+2024-03-15 * "REMA 1000" "Groceries - split with Alex"
+  Liabilities:CreditCard:Amex    -400 NOK
+  Expenses:Groceries              400 NOK  ; Full household spend
+  Assets:Receivables:Alex         200 NOK  ; Alex's half (tracked as debt)
+  Income:Reimbursements          -200 NOK  ; Offsets your net expense
+```
+
+This way `Expenses:Groceries` shows the true household spending (400 NOK), while your net cost remains correct (200 NOK after the reimbursement offset).
+
+When Alex pays you back:
+
+```beancount
+2024-03-20 * "Vipps from Alex" "Settling grocery bill"
+  Assets:Bank:Checking            200 NOK
+  Assets:Receivables:Alex        -200 NOK
+```
+
+The `Assets:Receivables:Alex` account balance shows how much Alex owes you at any time.
+
+#### Strategy 2: Periodic Settlement with Queries
+
+Instead of settling each transaction, do monthly settlements using queries to calculate the amount.
+
+**Step 1:** Throughout the month, record split transactions (4 postings each):
+
+```beancount
+2024-03-10 * "REMA 1000" "Groceries"
+  Liabilities:CreditCard:Amex    -400 NOK
+  Expenses:Groceries              400 NOK
+  Assets:Receivables:Alex         200 NOK
+  Income:Reimbursements          -200 NOK
+
+2024-03-15 * "NETFLIX"
+  Liabilities:CreditCard:Amex    -179 NOK
+  Expenses:Subscriptions          179 NOK
+  Assets:Receivables:Alex         89.50 NOK
+  Income:Reimbursements          -89.50 NOK
+```
+
+**Step 2:** Query how much Alex owes for the month (in Fava's Query page):
+
+```sql
+SELECT sum(position)
+WHERE account = "Assets:Receivables:Alex"
+  AND date >= 2024-03-01
+  AND date < 2024-04-01
+```
+
+Result: `289.50 NOK`
+
+**Step 3:** Create the settlement transaction:
+
+```beancount
+2024-04-01 * "March settlement from Alex"
+  Assets:Bank:Checking            289.50 NOK
+  Assets:Receivables:Alex        -289.50 NOK
+```
+
+**Useful queries:**
+
+```sql
+-- Current total balance (what they owe now)
+SELECT sum(position) WHERE account = "Assets:Receivables:Alex"
+
+-- Monthly breakdown for the year
+SELECT month, sum(position)
+WHERE account = "Assets:Receivables:Alex"
+GROUP BY month
+
+-- All transactions in the receivable account
+SELECT date, narration, position
+WHERE account = "Assets:Receivables:Alex"
+```
+
+**Full year example** (after running monthly queries):
+
+```beancount
+2024-02-01 * "January settlement"
+  Assets:Bank:Checking         720 NOK
+  Assets:Receivables:Alex     -720 NOK
+
+2024-03-01 * "February settlement"
+  Assets:Bank:Checking         650 NOK
+  Assets:Receivables:Alex     -650 NOK
+
+2024-04-01 * "March settlement"
+  Assets:Bank:Checking         289.50 NOK
+  Assets:Receivables:Alex     -289.50 NOK
+```
+
+After all settlements, `Assets:Receivables:Alex` balance should be 0.
+
+#### Tips for Shared Finances
+
+- **Check balances in Fava**: Navigate to the receivables account to see running balance
+- **Add metadata** for context: `partner: "Alex"` or `split: "50/50"`
+- **Use links** to connect related transactions: `^march-2024-settlement`
+- **Regular settlement** prevents large balances from accumulating
+
 ### Deduplication
 
 Transactions are automatically deduplicated using FITID (Financial Transaction ID). Re-running the import won't create duplicates. To force re-import:
