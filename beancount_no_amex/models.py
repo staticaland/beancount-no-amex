@@ -1,37 +1,9 @@
-"""Data models for OFX/QBO file parsing.
-
-This module contains models specific to OFX file format parsing.
-For generic transaction classification, see the classify module.
-"""
+"""Data models for OFX/QBO file parsing."""
 
 from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
-
-# Re-export classification components for backwards compatibility
-from beancount_no_amex.classify import (
-    AmountCondition,
-    AmountOperator,
-    AmountValue,
-    TransactionPattern,
-    _AmountProxy,
-    amount,
-)
-
-__all__ = [
-    # OFX-specific models
-    "RawTransaction",
-    "ParsedTransaction",
-    "BeanTransaction",
-    "QboFileData",
-    # Re-exported from classify (backwards compatibility)
-    "AmountCondition",
-    "AmountOperator",
-    "AmountValue",
-    "TransactionPattern",
-    "amount",
-]
 
 
 class RawTransaction(BaseModel):

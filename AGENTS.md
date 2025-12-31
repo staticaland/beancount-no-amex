@@ -8,7 +8,7 @@ Guidelines for AI agents working on this codebase.
 
 ```bash
 # Install all dependencies including dev tools
-uv sync --group dev
+uv sync --extra dev
 
 # Run tests
 uv run pytest -v
@@ -31,7 +31,7 @@ uv run beancount-no-amex extract file.qbo
 uv add <package>
 
 # Add a dev dependency
-uv add --group dev <package>
+uv add --optional dev <package>
 ```
 
 ## Project Structure
@@ -74,7 +74,7 @@ from beancount_no_amex import TransactionPattern, amount, Importer
 Run full test suite after changes:
 
 ```bash
-uv sync --group dev
+uv sync --extra dev
 uv run pytest -v
 ```
 
@@ -86,7 +86,7 @@ When extracting code into new modules:
 
 1. Create new module with clear docstring explaining purpose
 2. Move code, keeping public API stable
-3. Add re-exports in original location for backwards compatibility
-4. Update `__init__.py` to export from new location
-5. Run `uv sync --group dev && uv run pytest -v`
+3. Update `__init__.py` to export from new location
+4. Update imports in tests to use new module paths
+5. Run `uv sync --extra dev && uv run pytest -v`
 6. Verify all tests pass before committing

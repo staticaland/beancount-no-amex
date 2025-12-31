@@ -15,7 +15,8 @@ from beancount.core.amount import Amount
 from beancount.core.number import D
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
-from beancount_no_amex.models import RawTransaction, TransactionPattern, amount
+from beancount_no_amex.classify import TransactionPattern, amount
+from beancount_no_amex.models import RawTransaction
 
 
 class TestFinalizeBasics:
