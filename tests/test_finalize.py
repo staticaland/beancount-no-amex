@@ -15,7 +15,7 @@ from beancount.core.amount import Amount
 from beancount.core.number import D
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
-from beancount_no_amex.classify import AccountSplit, SharedExpense, TransactionPattern, amount
+from beancount_classifier import AccountSplit, SharedExpense, TransactionPattern, amount
 from beancount_no_amex.models import RawTransaction
 
 

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
-from beancount_no_amex.classify import TransactionPattern, amount
+from beancount_classifier import TransactionPattern, amount
 from beancount_no_amex.models import (
     BeanTransaction,
     ParsedTransaction,

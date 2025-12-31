@@ -1,7 +1,7 @@
 from .credit import AmexAccountConfig, Importer  # noqa: F401
 
-# Classification components (generic, reusable across importers)
-from .classify import (
+# Classification components (re-exported from beancount-classifier)
+from beancount_classifier import (
     # Fluent API - "Classification for Humans"
     match,   # match("SPOTIFY") >> "Expenses:Music"
     when,    # when(amount < 50) >> "Expenses:PettyCash"

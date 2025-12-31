@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import pytest
 
-from beancount_no_amex import (
+from beancount_classifier import (
     match,
     when,
     field,
@@ -19,7 +19,7 @@ from beancount_no_amex import (
     TransactionClassifier,
     TransactionPattern,
 )
-from beancount_no_amex.classify import _PatternResult
+from beancount_classifier.classify import _PatternResult
 
 
 class TestMatchFunction:
@@ -378,9 +378,9 @@ class TestFluentApiImports:
         assert callable(shared)
         assert hasattr(amount, '__lt__')
 
-    def test_classify_module_imports(self):
-        """All fluent API components are importable from classify module."""
-        from beancount_no_amex.classify import match, when, field, shared, amount
+    def test_classifier_module_imports(self):
+        """All fluent API components are importable from beancount_classifier."""
+        from beancount_classifier import match, when, field, shared, amount
 
         assert callable(match)
         assert callable(when)

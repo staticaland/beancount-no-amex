@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from beancount_no_amex.classify import (
+from beancount_classifier import (
     AccountSplit,
     AmountCondition,
     AmountOperator,

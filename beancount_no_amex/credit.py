@@ -12,7 +12,7 @@ from beancount.core.number import D
 from lxml import etree
 from pydantic import ValidationError
 
-from beancount_no_amex.classify import (
+from beancount_classifier import (
     AccountSplit,
     ClassifierMixin,
     TransactionPattern,
@@ -589,7 +589,7 @@ def get_importers() -> list[beangulp.Importer]:
     - Different account names for different cards
     - Separate categorization rules per account
     """
-    from beancount_no_amex.classify import amount
+    from beancount_classifier import amount
 
     return [
         Importer(AmexAccountConfig(
