@@ -1,25 +1,35 @@
-from .credit import AmexAccountConfig, Importer  # NOQA
-from .models import (
+from .credit import AmexAccountConfig, Importer  # noqa: F401
+
+# Classification components (generic, reusable across importers)
+from .classify import (
     AmountCondition,
     AmountOperator,
-    BeanTransaction,
-    ParsedTransaction,
-    QboFileData,
-    RawTransaction,
+    ClassifierMixin,
+    TransactionClassifier,
     TransactionPattern,
     amount,  # Proxy for natural comparison syntax
 )
 
+# OFX-specific data models
+from .models import (
+    BeanTransaction,
+    ParsedTransaction,
+    QboFileData,
+    RawTransaction,
+)
+
 __all__ = [
-    # Main classes
+    # Main importer classes
     "AmexAccountConfig",
     "Importer",
-    # Pattern matching
+    # Classification (generic, reusable)
     "AmountCondition",
     "AmountOperator",
+    "ClassifierMixin",
+    "TransactionClassifier",
     "TransactionPattern",
     "amount",  # Use: amount < 50, amount > 100, amount.between(50, 100)
-    # Data models
+    # OFX data models
     "BeanTransaction",
     "ParsedTransaction",
     "QboFileData",

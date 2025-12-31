@@ -1,7 +1,6 @@
 import datetime
 import traceback
 from pathlib import Path
-from typing import Any
 from dataclasses import dataclass, field
 
 import beangulp
@@ -13,12 +12,14 @@ from beancount.core.number import D
 from lxml import etree
 from pydantic import ValidationError
 
+from beancount_no_amex.classify import (
+    ClassifierMixin,
+    TransactionPattern,
+)
 from beancount_no_amex.models import (
-    BeanTransaction,
     ParsedTransaction,
     QboFileData,
     RawTransaction,
-    TransactionPattern,
 )
 
 # Constants
@@ -151,8 +152,11 @@ def find_currency(tree) -> str | None:
     )
 
 
-class Importer(beangulp.Importer):
-    """Importer for American Express QBO statements."""
+class Importer(ClassifierMixin, beangulp.Importer):
+    """Importer for American Express QBO statements.
+
+    Inherits transaction classification from ClassifierMixin.
+    """
 
     def __init__(
         self,
@@ -374,45 +378,7 @@ class Importer(beangulp.Importer):
         latest_date = max(t.date for t in parsed_transactions)
         return latest_date
 
-    def finalize(self, txn: data.Transaction, row: Any) -> data.Transaction | None:
-        """Post-process the transaction with categorization based on patterns.
-
-        Args:
-            txn: The transaction object to finalize.
-            row: The original transaction data from the QBO file.
-
-        Returns:
-            The modified transaction with balancing posting, or unchanged if no match.
-        """
-        if not txn.postings or not self.transaction_patterns:
-            return txn
-
-        narration = txn.narration or ""
-        txn_amount = txn.postings[0].units.number
-
-        for pattern in self.transaction_patterns:
-            if pattern.matches(narration, txn_amount):
-                return self._add_balancing_posting(txn, pattern.account)
-
-        return txn
-
-    def _add_balancing_posting(
-        self, txn: data.Transaction, account: str
-    ) -> data.Transaction:
-        """Add a balancing posting to the transaction.
-
-        Args:
-            txn: The transaction to modify.
-            account: The target account for the balancing posting.
-
-        Returns:
-            The transaction with the balancing posting added.
-        """
-        opposite_units = Amount(
-            -txn.postings[0].units.number, txn.postings[0].units.currency
-        )
-        balancing_posting = data.Posting(account, opposite_units, None, None, None, None)
-        return txn._replace(postings=txn.postings + [balancing_posting])
+    # finalize() is inherited from ClassifierMixin
 
     def extract(self, filepath: str, existing_entries: list[data.Directive]) -> list[data.Directive]:
         """
@@ -582,7 +548,7 @@ def get_importers() -> list[beangulp.Importer]:
     - Different account names for different cards
     - Separate categorization rules per account
     """
-    from beancount_no_amex.models import amount
+    from beancount_no_amex.classify import amount
 
     return [
         Importer(AmexAccountConfig(
