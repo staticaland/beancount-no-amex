@@ -1,43 +1,70 @@
-"""Generic transaction classification for Beancount importers.
+"""Transaction classification for humans.
 
-This module provides reusable components for classifying and categorizing
-transactions based on patterns. It can be used by any Beancount importer,
-regardless of the source format (OFX, CSV, MT940, etc.).
+A Pythonic, fluent API for categorizing financial transactions.
+Works with any Beancount importer (OFX, CSV, MT940, etc.).
 
-Example usage:
+Quick Start:
 
-    from beancount_no_amex.classify import (
-        TransactionPattern,
-        amount,
-        ClassifierMixin,
-    )
+    from beancount_no_amex import match, when, amount, TransactionClassifier
 
-    # Define patterns
-    patterns = [
-        TransactionPattern(narration="SPOTIFY", account="Expenses:Subscriptions"),
-        TransactionPattern(
-            narration=r"REMA\\s*1000",
-            regex=True,
-            account="Expenses:Groceries"
-        ),
-        TransactionPattern(
-            amount_condition=amount < 50,
-            account="Expenses:PettyCash"
-        ),
+    rules = [
+        # Simple substring matching
+        match("SPOTIFY") >> "Expenses:Music",
+        match("NETFLIX") >> "Expenses:Entertainment",
+
+        # Regex patterns
+        match(r"REMA\\s*1000").regex >> "Expenses:Groceries",
+
+        # Case-insensitive matching
+        match("starbucks").ignorecase >> "Expenses:Coffee",
+
+        # Amount-based rules
+        when(amount < 50) >> "Expenses:PettyCash",
+        when(amount.between(100, 500)) >> "Expenses:Medium",
+
+        # Combined conditions
+        match("VINMONOPOLET").where(amount > 500) >> "Expenses:Alcohol:Fine",
+
+        # Split across multiple accounts
+        match("COSTCO") >> [
+            ("Expenses:Groceries", 80),
+            ("Expenses:Household", 20),
+        ],
+
+        # Shared expenses with roommates
+        match("GROCERIES") >> "Expenses:Groceries" | shared("Assets:Receivables:Alex", 50),
     ]
 
-    # Use in your importer
+    # Create classifier with optional default account
+    classifier = TransactionClassifier(rules, default="Expenses:Uncategorized")
+
+    # Classify a transaction
+    result = classifier.classify("SPOTIFY Premium", Decimal("-9.99"))
+    # => ClassificationResult with account="Expenses:Music"
+
+Use with beangulp importers:
+
+    from beancount_no_amex import match, amount, ClassifierMixin
+
     class MyImporter(ClassifierMixin, beangulp.Importer):
-        def __init__(self, config):
-            self.transaction_patterns = config.patterns
-            # ... your importer setup
+        def __init__(self):
+            self.transaction_patterns = [
+                match("SPOTIFY") >> "Expenses:Music",
+                when(amount < 50) >> "Expenses:PettyCash",
+            ]
+            self.default_account = "Expenses:Uncategorized"
 """
+
+from __future__ import annotations
 
 from decimal import Decimal
 from enum import Enum
 from functools import cached_property
 import re
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Union
 
 from beancount.core import data
 from beancount.core.amount import Amount
@@ -427,6 +454,378 @@ amount = _AmountProxy()
 
 
 # =============================================================================
+# Fluent API - "Classification for Humans"
+# =============================================================================
+
+# Type for split specifications: list of (account, percentage) tuples
+SplitSpec = list[tuple[str, int | float | Decimal]]
+
+
+class _SharedExpenseSpec:
+    """Specification for shared expense, used with | operator."""
+
+    def __init__(
+        self,
+        receivable_account: str,
+        percentage: int | float | Decimal,
+        offset_account: str = "Income:Reimbursements",
+    ):
+        self.receivable_account = receivable_account
+        self.offset_account = offset_account
+        self.percentage = Decimal(str(percentage))
+
+
+def shared(
+    receivable: str,
+    percentage: int | float | Decimal,
+    offset: str = "Income:Reimbursements",
+) -> _SharedExpenseSpec:
+    """Create a shared expense specification.
+
+    Use with the | operator after >> to track shared expenses:
+
+        match("GROCERIES") >> "Expenses:Groceries" | shared("Assets:Receivables:Alex", 50)
+
+    Args:
+        receivable: Account to track what they owe (e.g., "Assets:Receivables:Alex")
+        percentage: Percentage of expense they owe (0-100)
+        offset: Income account for reimbursement offset (default: "Income:Reimbursements")
+
+    Returns:
+        A SharedExpenseSpec for use with the | operator
+    """
+    return _SharedExpenseSpec(receivable, percentage, offset)
+
+
+class _PatternResult:
+    """Result of >> operator, can be combined with | for shared expenses."""
+
+    def __init__(self, pattern: TransactionPattern):
+        self.pattern = pattern
+
+    def __or__(self, other: _SharedExpenseSpec) -> "_PatternResult":
+        """Add shared expense tracking with | operator."""
+        if not isinstance(other, _SharedExpenseSpec):
+            raise TypeError(f"Cannot use | with {type(other).__name__}, use shared()")
+
+        # Add to existing shared_with list or create new one
+        existing = list(self.pattern.shared_with or [])
+        existing.append(SharedExpense(
+            receivable_account=other.receivable_account,
+            offset_account=other.offset_account,
+            percentage=other.percentage,
+        ))
+
+        # Create new pattern with updated shared_with
+        self.pattern = TransactionPattern(
+            narration=self.pattern.narration,
+            regex=self.pattern.regex,
+            case_insensitive=self.pattern.case_insensitive,
+            amount_condition=self.pattern.amount_condition,
+            fields=self.pattern.fields,
+            fields_regex=self.pattern.fields_regex,
+            account=self.pattern.account,
+            splits=self.pattern.splits,
+            shared_with=existing,
+        )
+        return self
+
+    def build(self) -> TransactionPattern:
+        """Get the underlying TransactionPattern."""
+        return self.pattern
+
+
+class _MatchBuilder:
+    """Fluent builder for creating transaction patterns.
+
+    Created by match() or field(), supports chaining and >> operator.
+
+    Examples:
+        match("SPOTIFY") >> "Expenses:Music"
+        match(r"REMA\\s*1000").regex >> "Expenses:Groceries"
+        match("spotify").ignorecase >> "Expenses:Music"
+        match("VINMONOPOLET").where(amount > 500) >> "Expenses:Alcohol"
+    """
+
+    def __init__(
+        self,
+        narration: str | None = None,
+        *,
+        is_regex: bool = False,
+        ignore_case: bool = False,
+        amount_cond: AmountCondition | None = None,
+        fields: dict[str, str] | None = None,
+        fields_regex: bool = False,
+    ):
+        self._narration = narration
+        self._is_regex = is_regex
+        self._ignore_case = ignore_case
+        self._amount_cond = amount_cond
+        self._fields = fields
+        self._fields_regex = fields_regex
+
+    @property
+    def regex(self) -> "_MatchBuilder":
+        """Treat the pattern as a regular expression.
+
+        Example:
+            match(r"REMA\\s*1000").regex >> "Expenses:Groceries"
+        """
+        return _MatchBuilder(
+            self._narration,
+            is_regex=True,
+            ignore_case=self._ignore_case,
+            amount_cond=self._amount_cond,
+            fields=self._fields,
+            fields_regex=self._fields_regex,
+        )
+
+    @property
+    def ignorecase(self) -> "_MatchBuilder":
+        """Make the match case-insensitive.
+
+        Example:
+            match("spotify").ignorecase >> "Expenses:Music"
+        """
+        return _MatchBuilder(
+            self._narration,
+            is_regex=self._is_regex,
+            ignore_case=True,
+            amount_cond=self._amount_cond,
+            fields=self._fields,
+            fields_regex=self._fields_regex,
+        )
+
+    # Alias for ignorecase
+    @property
+    def i(self) -> "_MatchBuilder":
+        """Short alias for ignorecase.
+
+        Example:
+            match("spotify").i >> "Expenses:Music"
+        """
+        return self.ignorecase
+
+    def where(self, condition: AmountCondition | "_FieldBuilder") -> "_MatchBuilder":
+        """Add an additional condition (amount or field).
+
+        Examples:
+            match("VINMONOPOLET").where(amount > 500) >> "Expenses:Alcohol"
+            match("ATM").where(field(type="withdrawal")) >> "Expenses:Cash"
+        """
+        if isinstance(condition, AmountCondition):
+            return _MatchBuilder(
+                self._narration,
+                is_regex=self._is_regex,
+                ignore_case=self._ignore_case,
+                amount_cond=condition,
+                fields=self._fields,
+                fields_regex=self._fields_regex,
+            )
+        elif isinstance(condition, _FieldBuilder):
+            # Merge fields
+            merged = dict(self._fields or {})
+            merged.update(condition._fields or {})
+            return _MatchBuilder(
+                self._narration,
+                is_regex=self._is_regex,
+                ignore_case=self._ignore_case,
+                amount_cond=self._amount_cond,
+                fields=merged,
+                fields_regex=condition._fields_regex or self._fields_regex,
+            )
+        else:
+            raise TypeError(f"where() expects AmountCondition or field(), got {type(condition)}")
+
+    def _build_pattern(
+        self,
+        account: str | None = None,
+        splits: list[AccountSplit] | None = None,
+    ) -> TransactionPattern:
+        """Build the TransactionPattern from current state."""
+        return TransactionPattern(
+            narration=self._narration,
+            regex=self._is_regex,
+            case_insensitive=self._ignore_case,
+            amount_condition=self._amount_cond,
+            fields=self._fields,
+            fields_regex=self._fields_regex,
+            account=account,
+            splits=splits,
+        )
+
+    def __rshift__(self, target: str | SplitSpec) -> _PatternResult:
+        """Create pattern with >> operator.
+
+        Examples:
+            match("SPOTIFY") >> "Expenses:Music"
+            match("COSTCO") >> [("Expenses:Groceries", 80), ("Expenses:Household", 20)]
+        """
+        if isinstance(target, str):
+            return _PatternResult(self._build_pattern(account=target))
+        elif isinstance(target, list):
+            splits = [
+                AccountSplit(account=acct, percentage=Decimal(str(pct)))
+                for acct, pct in target
+            ]
+            return _PatternResult(self._build_pattern(splits=splits))
+        else:
+            raise TypeError(f">> expects str or list of (account, pct) tuples, got {type(target)}")
+
+
+class _FieldBuilder(_MatchBuilder):
+    """Builder for field-based patterns.
+
+    Created by field(), can be used standalone or with .where().
+
+    Examples:
+        field(to_account="98712345678") >> "Assets:Savings"
+        field(merchant_code=r"5411|5412").regex >> "Expenses:Groceries"
+    """
+
+    def __init__(
+        self,
+        fields: dict[str, str],
+        fields_regex: bool = False,
+    ):
+        super().__init__(
+            narration=None,
+            fields=fields,
+            fields_regex=fields_regex,
+        )
+
+    @property
+    def regex(self) -> "_FieldBuilder":
+        """Treat field patterns as regular expressions."""
+        return _FieldBuilder(self._fields, fields_regex=True)
+
+
+class _WhenBuilder:
+    """Builder for condition-only patterns (no narration).
+
+    Created by when(), for amount-based classification.
+
+    Examples:
+        when(amount < 50) >> "Expenses:PettyCash"
+        when(amount.between(100, 500)) >> "Expenses:Medium"
+    """
+
+    def __init__(self, condition: AmountCondition):
+        self._condition = condition
+
+    def __rshift__(self, target: str | SplitSpec) -> _PatternResult:
+        """Create pattern with >> operator."""
+        if isinstance(target, str):
+            pattern = TransactionPattern(
+                amount_condition=self._condition,
+                account=target,
+            )
+            return _PatternResult(pattern)
+        elif isinstance(target, list):
+            splits = [
+                AccountSplit(account=acct, percentage=Decimal(str(pct)))
+                for acct, pct in target
+            ]
+            pattern = TransactionPattern(
+                amount_condition=self._condition,
+                splits=splits,
+            )
+            return _PatternResult(pattern)
+        else:
+            raise TypeError(f">> expects str or list of (account, pct) tuples, got {type(target)}")
+
+
+def match(pattern: str) -> _MatchBuilder:
+    """Start building a narration-based pattern.
+
+    This is the primary entry point for the fluent API. Patterns match
+    as substrings by default. Use .regex for regular expression matching.
+
+    Examples:
+        # Simple substring match
+        match("SPOTIFY") >> "Expenses:Music"
+
+        # Regex pattern
+        match(r"REMA\\s*1000").regex >> "Expenses:Groceries"
+
+        # Case-insensitive
+        match("spotify").ignorecase >> "Expenses:Music"
+        match("spotify").i >> "Expenses:Music"  # short form
+
+        # With amount condition
+        match("VINMONOPOLET").where(amount > 500) >> "Expenses:Alcohol:Expensive"
+
+        # Split across accounts
+        match("COSTCO") >> [
+            ("Expenses:Groceries", 80),
+            ("Expenses:Household", 20),
+        ]
+
+        # With shared expense tracking
+        match("GROCERIES") >> "Expenses:Groceries" | shared("Assets:Receivables:Alex", 50)
+
+    Args:
+        pattern: The narration pattern to match (substring or regex)
+
+    Returns:
+        A builder that can be chained and finalized with >>
+    """
+    return _MatchBuilder(pattern)
+
+
+def when(condition: AmountCondition) -> _WhenBuilder:
+    """Start building an amount-based pattern.
+
+    Use this for patterns that match based on transaction amount only,
+    without matching the narration text.
+
+    Examples:
+        when(amount < 50) >> "Expenses:PettyCash"
+        when(amount > 1000) >> "Expenses:Large"
+        when(amount.between(100, 500)) >> "Expenses:Medium"
+
+    Args:
+        condition: An amount condition (use the `amount` proxy)
+
+    Returns:
+        A builder that can be finalized with >>
+    """
+    if not isinstance(condition, AmountCondition):
+        raise TypeError("when() expects an amount condition like: amount < 50")
+    return _WhenBuilder(condition)
+
+
+def field(**kwargs: str) -> _FieldBuilder:
+    """Start building a field-based pattern.
+
+    Use this for patterns that match on metadata fields (bank account
+    numbers, transaction types, merchant codes, etc.).
+
+    Examples:
+        # Match specific account number
+        field(to_account="98712345678") >> "Assets:Savings"
+
+        # Regex pattern for merchant category codes
+        field(merchant_code=r"5411|5412").regex >> "Expenses:Groceries"
+
+        # Multiple fields (all must match)
+        field(type="ATM", location="Oslo") >> "Expenses:Cash"
+
+        # Combine with narration matching
+        match("TRANSFER").where(field(to_account="12345")) >> "Assets:Savings"
+
+    Args:
+        **kwargs: Field name to pattern mappings
+
+    Returns:
+        A builder that can be chained and finalized with >>
+    """
+    if not kwargs:
+        raise ValueError("field() requires at least one field=pattern argument")
+    return _FieldBuilder(kwargs)
+
+
+# =============================================================================
 # Classification Result
 # =============================================================================
 
@@ -445,17 +844,55 @@ class ClassificationResult(BaseModel):
 # =============================================================================
 
 
+# Type alias for pattern inputs (both old and fluent API)
+PatternInput = TransactionPattern | _PatternResult
+
+
+def _normalize_patterns(
+    patterns: list[PatternInput],
+) -> list[TransactionPattern]:
+    """Convert fluent API patterns to TransactionPattern objects.
+
+    Accepts both TransactionPattern objects and _PatternResult objects
+    (from the fluent API's >> operator).
+    """
+    result = []
+    for p in patterns:
+        if isinstance(p, _PatternResult):
+            result.append(p.pattern)
+        elif isinstance(p, TransactionPattern):
+            result.append(p)
+        else:
+            raise TypeError(
+                f"Expected TransactionPattern or fluent pattern (match() >> ...), "
+                f"got {type(p).__name__}"
+            )
+    return result
+
+
 class TransactionClassifier:
     """Generic transaction classifier that matches patterns against transactions.
 
     This class can be used standalone or through the ClassifierMixin.
 
-    Example:
+    Example using fluent API:
+        from beancount_no_amex import match, when, amount, TransactionClassifier
+
+        rules = [
+            match("SPOTIFY") >> "Expenses:Music",
+            match(r"REMA\\s*1000").regex >> "Expenses:Groceries",
+            when(amount < 50) >> "Expenses:PettyCash",
+        ]
+
+        classifier = TransactionClassifier(rules, default="Expenses:Uncategorized")
+        result = classifier.classify("SPOTIFY Premium", Decimal("-9.99"))
+
+    Example with traditional API:
         classifier = TransactionClassifier(patterns)
         splits = classifier.classify("SPOTIFY PREMIUM", Decimal("-9.99"))
         if splits:
-            for account, percentage in splits:
-                print(f"  {percentage}% -> {account}")
+            for split in splits.splits:
+                print(f"  {split.percentage}% -> {split.account}")
 
         # With default account for unmatched transactions
         classifier = TransactionClassifier(
@@ -464,7 +901,6 @@ class TransactionClassifier:
         )
 
         # With default split percentage (for review workflow)
-        # Matched transactions split between matched account and default
         classifier = TransactionClassifier(
             patterns,
             default_account="Expenses:NeedsReview",
@@ -474,28 +910,32 @@ class TransactionClassifier:
 
     def __init__(
         self,
-        patterns: list[TransactionPattern],
+        patterns: list[PatternInput],
         default_account: str | None = None,
         default_split_percentage: Decimal | None = None,
+        *,
+        default: str | None = None,  # Alias for default_account (shorter)
     ):
         """Initialize the classifier with patterns and optional defaults.
 
         Args:
-            patterns: List of TransactionPattern objects. Patterns are evaluated
-                     in order; the first match wins.
+            patterns: List of patterns. Accepts TransactionPattern objects or
+                     fluent API patterns (match() >> "Account"). Patterns are
+                     evaluated in order; the first match wins.
             default_account: Account for unmatched transactions. When set,
                            unmatched transactions go 100% to this account.
+            default: Alias for default_account (use whichever you prefer).
             default_split_percentage: When set (0-100), matched transactions are
                            split: (100 - this value)% to matched account(s),
                            this value % to default_account. Requires default_account.
                            Set to None to disable (default).
         """
-        self.patterns = patterns
-        self.default_account = default_account
+        self.patterns = _normalize_patterns(patterns)
+        self.default_account = default_account or default
         self.default_split_percentage = default_split_percentage
 
         # Validate: default_split_percentage requires default_account
-        if default_split_percentage is not None and default_account is None:
+        if default_split_percentage is not None and self.default_account is None:
             raise ValueError("default_split_percentage requires default_account to be set")
 
     def classify(
@@ -659,13 +1099,25 @@ class ClassifierMixin:
     categorization based on patterns.
 
     Your importer class must have a `transaction_patterns` attribute
-    (list of TransactionPattern objects). Optionally, you can also set
-    `default_account` and `default_split_percentage` attributes.
+    (list of patterns). Optionally, you can also set `default_account`
+    and `default_split_percentage` attributes.
 
     For field-based matching, override the `get_fields()` method to extract
     fields from your source data format.
 
-    Example:
+    Example with fluent API:
+        from beancount_no_amex import match, when, amount, ClassifierMixin
+
+        class MyImporter(ClassifierMixin, beangulp.Importer):
+            def __init__(self, config):
+                self.transaction_patterns = [
+                    match("SPOTIFY") >> "Expenses:Music",
+                    match(r"REMA\\s*1000").regex >> "Expenses:Groceries",
+                    when(amount < 50) >> "Expenses:PettyCash",
+                ]
+                self.default_account = "Expenses:Uncategorized"
+
+    Example with traditional API:
         class MyImporter(ClassifierMixin, beangulp.Importer):
             def __init__(self, config):
                 self.transaction_patterns = config.transaction_patterns
@@ -687,7 +1139,7 @@ class ClassifierMixin:
     """
 
     # These attributes should be set by the importer class
-    transaction_patterns: list[TransactionPattern]
+    transaction_patterns: list[PatternInput]
     default_account: str | None = None
     default_split_percentage: Decimal | None = None
 
