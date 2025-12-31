@@ -15,7 +15,7 @@ from beancount.core.amount import Amount
 from beancount.core.number import D
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
-from beancount_no_amex.classify import AccountSplit, TransactionPattern, amount
+from beancount_no_amex.classify import AccountSplit, SharedExpense, TransactionPattern, amount
 from beancount_no_amex.models import RawTransaction
 
 
@@ -883,3 +883,158 @@ class TestFinalizeDefaultSplitPercentage:
         # 50% review
         assert result.postings[3].account == "Expenses:NeedsReview"
         assert result.postings[3].units.number == D("50.00")
+
+
+class TestFinalizeSharedExpenses:
+    """Tests for shared expense / receivables tracking in finalize."""
+
+    @pytest.fixture
+    def importer_with_shared_expense(self):
+        """Importer with shared expense patterns."""
+        config = AmexAccountConfig(
+            account_name="Liabilities:CreditCard:Amex",
+            currency="NOK",
+            transaction_patterns=[
+                TransactionPattern(
+                    narration="REMA 1000",
+                    account="Expenses:Groceries",
+                    shared_with=[
+                        SharedExpense(
+                            receivable_account="Assets:Receivables:Alex",
+                            offset_account="Income:Reimbursements",
+                            percentage=50,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        return Importer(config=config, debug=False)
+
+    def test_shared_expense_creates_four_postings(self, importer_with_shared_expense):
+        """Shared expense creates 4 postings: CC, expense, receivable, offset."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-400.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="REMA 1000 OSLO",
+            narration="REMA 1000 OSLO",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_shared_expense.finalize(txn, RawTransaction())
+
+        # 4 postings: CC + expense + receivable + offset
+        assert len(result.postings) == 4
+
+        # 1. Credit card (original)
+        assert result.postings[0].account == "Liabilities:CreditCard:Amex"
+        assert result.postings[0].units.number == D("-400.00")
+
+        # 2. Expense (full amount - shows true household spend)
+        assert result.postings[1].account == "Expenses:Groceries"
+        assert result.postings[1].units.number == D("400.00")
+
+        # 3. Receivable (50% - tracks what Alex owes)
+        assert result.postings[2].account == "Assets:Receivables:Alex"
+        assert result.postings[2].units.number == D("200.00")
+
+        # 4. Offset (negative 50% - reduces your net expense)
+        assert result.postings[3].account == "Income:Reimbursements"
+        assert result.postings[3].units.number == D("-200.00")
+
+    def test_shared_expense_with_multiple_people(self):
+        """Sharing with multiple people creates multiple receivable/offset pairs."""
+        config = AmexAccountConfig(
+            account_name="Liabilities:CreditCard:Amex",
+            currency="NOK",
+            transaction_patterns=[
+                TransactionPattern(
+                    narration="RESTAURANT",
+                    account="Expenses:Dining",
+                    shared_with=[
+                        SharedExpense(
+                            receivable_account="Assets:Receivables:Alex",
+                            offset_account="Income:Reimbursements",
+                            percentage=33,
+                        ),
+                        SharedExpense(
+                            receivable_account="Assets:Receivables:Jordan",
+                            offset_account="Income:Reimbursements",
+                            percentage=33,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        importer = Importer(config=config, debug=False)
+
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-300.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="RESTAURANT",
+            narration="RESTAURANT DOWNTOWN",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer.finalize(txn, RawTransaction())
+
+        # 6 postings: CC + expense + 2x(receivable + offset)
+        assert len(result.postings) == 6
+
+        # Expense is still full amount
+        assert result.postings[1].account == "Expenses:Dining"
+        assert result.postings[1].units.number == D("300.00")
+
+        # Alex's share: 33% of 300 = 99
+        assert result.postings[2].account == "Assets:Receivables:Alex"
+        assert result.postings[2].units.number == D("99.00")
+        assert result.postings[3].account == "Income:Reimbursements"
+        assert result.postings[3].units.number == D("-99.00")
+
+        # Jordan's share: 33% of 300 = 99
+        assert result.postings[4].account == "Assets:Receivables:Jordan"
+        assert result.postings[4].units.number == D("99.00")
+        assert result.postings[5].account == "Income:Reimbursements"
+        assert result.postings[5].units.number == D("-99.00")
+
+    def test_shared_expense_preserves_currency(self, importer_with_shared_expense):
+        """Shared expense postings preserve the original currency."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-100.00"), "USD"),  # Different currency
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="REMA 1000",
+            narration="REMA 1000",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_shared_expense.finalize(txn, RawTransaction())
+
+        # All postings should use USD
+        for posting in result.postings:
+            assert posting.units.currency == "USD"

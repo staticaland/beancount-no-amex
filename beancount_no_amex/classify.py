@@ -83,6 +83,47 @@ class AccountSplit(BaseModel):
         return val
 
 
+class SharedExpense(BaseModel):
+    """Track shared expenses with receivables and reimbursement offsets.
+
+    When you pay for something that someone else owes you for (partially or fully),
+    use this to generate the additional postings that track the receivable and
+    offset your net expense.
+
+    This creates a zero-sum pair of postings:
+    - receivable_account: Positive amount (asset tracking what they owe you)
+    - offset_account: Negative amount (income offsetting your expense)
+
+    Example:
+        SharedExpense(
+            receivable_account="Assets:Receivables:Alex",
+            offset_account="Income:Reimbursements",
+            percentage=50,  # Alex owes 50%
+        )
+
+    For a -400 NOK grocery purchase with 50% shared, this generates:
+        Liabilities:CreditCard      -400 NOK  (you paid)
+        Expenses:Groceries           400 NOK  (full household expense)
+        Assets:Receivables:Alex      200 NOK  (Alex owes you)
+        Income:Reimbursements       -200 NOK  (offsets your net expense)
+
+    Your net expense is 200 NOK, but Expenses:Groceries shows the true 400 NOK
+    household spend for budgeting purposes.
+    """
+    receivable_account: str  # e.g., "Assets:Receivables:Alex"
+    offset_account: str  # e.g., "Income:Reimbursements"
+    percentage: Decimal  # Percentage of the expense they owe
+
+    @field_validator('percentage', mode='before')
+    @classmethod
+    def validate_percentage(cls, v):
+        """Ensure percentage is a valid decimal between 0 and 100."""
+        val = Decimal(str(v)) if isinstance(v, (str, int, float)) else v
+        if val < 0 or val > 100:
+            raise ValueError("percentage must be between 0 and 100")
+        return val
+
+
 class AmountCondition(BaseModel):
     """Condition for matching transaction amounts.
 
@@ -177,6 +218,19 @@ class TransactionPattern(BaseModel):
                 AccountSplit(account="Expenses:Household", percentage=20),
             ]
         )
+
+        # Shared expense with receivables tracking
+        TransactionPattern(
+            narration="REMA 1000",
+            account="Expenses:Groceries",
+            shared_with=[
+                SharedExpense(
+                    receivable_account="Assets:Receivables:Alex",
+                    offset_account="Income:Reimbursements",
+                    percentage=50,  # Alex owes 50%
+                ),
+            ]
+        )
     """
     narration: str | None = None
     regex: bool = False  # If True, narration is treated as a regex pattern
@@ -184,6 +238,7 @@ class TransactionPattern(BaseModel):
     amount_condition: AmountCondition | None = None
     account: str | None = None  # Target account (single), mutually exclusive with splits
     splits: list[AccountSplit] | None = None  # Split across multiple accounts
+    shared_with: list[SharedExpense] | None = None  # Track shared expenses with others
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -205,6 +260,12 @@ class TransactionPattern(BaseModel):
             total = sum(s.percentage for s in self.splits)
             if total > 100:
                 raise ValueError(f"Split percentages sum to {total}, must be <= 100")
+
+        # Validate shared_with percentages sum to <= 100
+        if self.shared_with is not None:
+            total = sum(s.percentage for s in self.shared_with)
+            if total > 100:
+                raise ValueError(f"shared_with percentages sum to {total}, must be <= 100")
 
         return self
 
@@ -311,6 +372,20 @@ amount = _AmountProxy()
 
 
 # =============================================================================
+# Classification Result
+# =============================================================================
+
+
+class ClassificationResult(BaseModel):
+    """Result of classifying a transaction.
+
+    Contains both the expense splits and any shared expense tracking info.
+    """
+    splits: list[AccountSplit]
+    shared_with: list[SharedExpense] | None = None
+
+
+# =============================================================================
 # Transaction Classifier
 # =============================================================================
 
@@ -368,7 +443,7 @@ class TransactionClassifier:
         if default_split_percentage is not None and default_account is None:
             raise ValueError("default_split_percentage requires default_account to be set")
 
-    def classify(self, narration: str, amount: Decimal) -> list[AccountSplit] | None:
+    def classify(self, narration: str, amount: Decimal) -> ClassificationResult | None:
         """Find the matching account(s) for a transaction.
 
         Args:
@@ -376,7 +451,7 @@ class TransactionClassifier:
             amount: The transaction amount
 
         Returns:
-            A list of AccountSplit objects representing how to split the transaction,
+            A ClassificationResult with splits and shared_with info,
             or None if no match and no default_account is configured.
 
             When default_split_percentage is set, matched transactions are split
@@ -392,6 +467,7 @@ class TransactionClassifier:
         if matched_pattern is not None:
             # Get the pattern's splits
             splits = matched_pattern.get_splits()
+            shared_with = matched_pattern.shared_with
 
             # Apply default_split_percentage if configured
             if self.default_split_percentage is not None:
@@ -409,13 +485,15 @@ class TransactionClassifier:
                     account=self.default_account,
                     percentage=self.default_split_percentage
                 ))
-                return scaled_splits
+                return ClassificationResult(splits=scaled_splits, shared_with=shared_with)
 
-            return splits
+            return ClassificationResult(splits=splits, shared_with=shared_with)
 
         # No match - use default_account if configured
         if self.default_account is not None:
-            return [AccountSplit(account=self.default_account, percentage=Decimal("100"))]
+            return ClassificationResult(
+                splits=[AccountSplit(account=self.default_account, percentage=Decimal("100"))]
+            )
 
         return None
 
@@ -436,29 +514,30 @@ class TransactionClassifier:
         Returns:
             A new transaction with the balancing posting added
         """
-        return self.add_balancing_postings(
-            txn,
-            [AccountSplit(account=account, percentage=Decimal("100"))]
+        result = ClassificationResult(
+            splits=[AccountSplit(account=account, percentage=Decimal("100"))]
         )
+        return self.add_balancing_postings(txn, result)
 
     def add_balancing_postings(
         self,
         txn: data.Transaction,
-        splits: list[AccountSplit],
+        result: ClassificationResult,
     ) -> data.Transaction:
-        """Add balancing postings to a transaction based on splits.
+        """Add balancing postings to a transaction based on classification result.
 
         Creates postings with opposite amounts proportional to each split's
-        percentage to balance the transaction.
+        percentage to balance the transaction. Also adds shared expense
+        postings if configured (receivable + offset pairs).
 
         Args:
             txn: The transaction to modify (must have at least one posting)
-            splits: List of AccountSplit objects defining how to split the balance
+            result: ClassificationResult with splits and optional shared_with
 
         Returns:
             A new transaction with the balancing postings added
         """
-        if not txn.postings or not splits:
+        if not txn.postings or not result.splits:
             return txn
 
         primary_posting = txn.postings[0]
@@ -467,7 +546,8 @@ class TransactionClassifier:
 
         new_postings = list(txn.postings)
 
-        for split in splits:
+        # Add expense splits (balancing postings)
+        for split in result.splits:
             # Calculate this split's portion of the opposite amount
             portion = split.percentage / Decimal("100")
             split_amount = -primary_amount * portion
@@ -478,6 +558,30 @@ class TransactionClassifier:
                 None, None, None, None
             )
             new_postings.append(balancing_posting)
+
+        # Add shared expense postings (receivable + offset pairs)
+        if result.shared_with:
+            for shared in result.shared_with:
+                portion = shared.percentage / Decimal("100")
+                # The receivable amount is positive (they owe you)
+                # For a debit (negative primary), receivable should be positive
+                receivable_amount = -primary_amount * portion
+
+                # Receivable posting (positive: asset tracking what they owe)
+                receivable_posting = data.Posting(
+                    shared.receivable_account,
+                    Amount(receivable_amount, currency),
+                    None, None, None, None
+                )
+                new_postings.append(receivable_posting)
+
+                # Offset posting (negative: income offsetting your expense)
+                offset_posting = data.Posting(
+                    shared.offset_account,
+                    Amount(-receivable_amount, currency),
+                    None, None, None, None
+                )
+                new_postings.append(offset_posting)
 
         return txn._replace(postings=new_postings)
 
@@ -550,7 +654,7 @@ class ClassifierMixin:
         narration = txn.narration or ""
         txn_amount = txn.postings[0].units.number
 
-        if splits := classifier.classify(narration, txn_amount):
-            return classifier.add_balancing_postings(txn, splits)
+        if result := classifier.classify(narration, txn_amount):
+            return classifier.add_balancing_postings(txn, result)
 
         return txn

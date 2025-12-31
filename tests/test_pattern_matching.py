@@ -16,6 +16,8 @@ from beancount_no_amex.classify import (
     AccountSplit,
     AmountCondition,
     AmountOperator,
+    ClassificationResult,
+    SharedExpense,
     TransactionClassifier,
     TransactionPattern,
     amount,
@@ -476,15 +478,15 @@ class TestTransactionClassifierDefaults:
         # Matched transaction
         result = classifier.classify("SPOTIFY PREMIUM", Decimal("100"))
         assert result is not None
-        assert len(result) == 1
-        assert result[0].account == "Expenses:Music"
+        assert len(result.splits) == 1
+        assert result.splits[0].account == "Expenses:Music"
 
         # Unmatched transaction goes to default
         result = classifier.classify("RANDOM MERCHANT", Decimal("100"))
         assert result is not None
-        assert len(result) == 1
-        assert result[0].account == "Expenses:Uncategorized"
-        assert result[0].percentage == Decimal("100")
+        assert len(result.splits) == 1
+        assert result.splits[0].account == "Expenses:Uncategorized"
+        assert result.splits[0].percentage == Decimal("100")
 
     def test_no_default_account_returns_none_for_unmatched(self):
         """Without default_account, unmatched transactions return None."""
@@ -507,13 +509,13 @@ class TestTransactionClassifierDefaults:
         )
         result = classifier.classify("SPOTIFY PREMIUM", Decimal("9.99"))
         assert result is not None
-        assert len(result) == 2
+        assert len(result.splits) == 2
         # 50% to matched account
-        assert result[0].account == "Expenses:Music"
-        assert result[0].percentage == Decimal("50")
+        assert result.splits[0].account == "Expenses:Music"
+        assert result.splits[0].percentage == Decimal("50")
         # 50% to default/review account
-        assert result[1].account == "Expenses:NeedsReview"
-        assert result[1].percentage == Decimal("50")
+        assert result.splits[1].account == "Expenses:NeedsReview"
+        assert result.splits[1].percentage == Decimal("50")
 
     def test_default_split_percentage_with_pattern_splits(self):
         """default_split_percentage works with pattern that has splits."""
@@ -533,17 +535,17 @@ class TestTransactionClassifierDefaults:
         )
         result = classifier.classify("COSTCO WHOLESALE", Decimal("200"))
         assert result is not None
-        assert len(result) == 3
+        assert len(result.splits) == 3
         # Pattern splits are scaled by (100 - 50) / 100 = 0.5
         # 80% * 0.5 = 40%
-        assert result[0].account == "Expenses:Groceries"
-        assert result[0].percentage == Decimal("40")
+        assert result.splits[0].account == "Expenses:Groceries"
+        assert result.splits[0].percentage == Decimal("40")
         # 20% * 0.5 = 10%
-        assert result[1].account == "Expenses:Household"
-        assert result[1].percentage == Decimal("10")
+        assert result.splits[1].account == "Expenses:Household"
+        assert result.splits[1].percentage == Decimal("10")
         # 50% to review
-        assert result[2].account == "Expenses:NeedsReview"
-        assert result[2].percentage == Decimal("50")
+        assert result.splits[2].account == "Expenses:NeedsReview"
+        assert result.splits[2].percentage == Decimal("50")
 
     def test_default_split_percentage_requires_default_account(self):
         """default_split_percentage requires default_account to be set."""
@@ -564,11 +566,11 @@ class TestTransactionClassifierDefaults:
             default_split_percentage=Decimal("0"),
         )
         result = classifier.classify("SPOTIFY PREMIUM", Decimal("9.99"))
-        assert len(result) == 2
+        assert len(result.splits) == 2
         # 100% to matched
-        assert result[0].percentage == Decimal("100")
+        assert result.splits[0].percentage == Decimal("100")
         # 0% to review
-        assert result[1].percentage == Decimal("0")
+        assert result.splits[1].percentage == Decimal("0")
 
     def test_hundred_default_split_percentage(self):
         """default_split_percentage of 100 means 0% to matched, 100% to review."""
@@ -581,18 +583,136 @@ class TestTransactionClassifierDefaults:
             default_split_percentage=Decimal("100"),
         )
         result = classifier.classify("SPOTIFY PREMIUM", Decimal("9.99"))
-        assert len(result) == 2
+        assert len(result.splits) == 2
         # 0% to matched
-        assert result[0].percentage == Decimal("0")
+        assert result.splits[0].percentage == Decimal("0")
         # 100% to review
-        assert result[1].percentage == Decimal("100")
+        assert result.splits[1].percentage == Decimal("100")
 
-    def test_classify_returns_list_of_splits(self):
-        """classify() returns list of AccountSplit objects."""
+    def test_classify_returns_classification_result(self):
+        """classify() returns ClassificationResult object."""
         patterns = [
             TransactionPattern(narration="TEST", account="Expenses:Test")
         ]
         classifier = TransactionClassifier(patterns)
         result = classifier.classify("TEST MERCHANT", Decimal("100"))
-        assert isinstance(result, list)
-        assert all(isinstance(s, AccountSplit) for s in result)
+        assert isinstance(result, ClassificationResult)
+        assert isinstance(result.splits, list)
+        assert all(isinstance(s, AccountSplit) for s in result.splits)
+
+
+class TestSharedExpense:
+    """Tests for SharedExpense model."""
+
+    def test_create_shared_expense(self):
+        """Basic SharedExpense creation."""
+        shared = SharedExpense(
+            receivable_account="Assets:Receivables:Alex",
+            offset_account="Income:Reimbursements",
+            percentage=50,
+        )
+        assert shared.receivable_account == "Assets:Receivables:Alex"
+        assert shared.offset_account == "Income:Reimbursements"
+        assert shared.percentage == Decimal("50")
+
+    def test_percentage_coercion(self):
+        """Percentage can be int, float, or string."""
+        shared_int = SharedExpense(
+            receivable_account="A", offset_account="B", percentage=50
+        )
+        assert shared_int.percentage == Decimal("50")
+
+        shared_float = SharedExpense(
+            receivable_account="A", offset_account="B", percentage=33.33
+        )
+        assert shared_float.percentage == Decimal("33.33")
+
+        shared_str = SharedExpense(
+            receivable_account="A", offset_account="B", percentage="25"
+        )
+        assert shared_str.percentage == Decimal("25")
+
+    def test_percentage_must_be_between_0_and_100(self):
+        """Percentage must be in valid range."""
+        with pytest.raises(ValidationError):
+            SharedExpense(receivable_account="A", offset_account="B", percentage=-10)
+        with pytest.raises(ValidationError):
+            SharedExpense(receivable_account="A", offset_account="B", percentage=101)
+
+
+class TestTransactionPatternSharedWith:
+    """Tests for TransactionPattern with shared_with."""
+
+    def test_pattern_with_shared_expense(self):
+        """Pattern can specify shared_with for receivables tracking."""
+        pattern = TransactionPattern(
+            narration="REMA 1000",
+            account="Expenses:Groceries",
+            shared_with=[
+                SharedExpense(
+                    receivable_account="Assets:Receivables:Alex",
+                    offset_account="Income:Reimbursements",
+                    percentage=50,
+                ),
+            ],
+        )
+        assert pattern.shared_with is not None
+        assert len(pattern.shared_with) == 1
+        assert pattern.shared_with[0].receivable_account == "Assets:Receivables:Alex"
+
+    def test_shared_with_percentage_cannot_exceed_100(self):
+        """shared_with percentages cannot sum to more than 100."""
+        with pytest.raises(ValidationError):
+            TransactionPattern(
+                narration="TEST",
+                account="Expenses:Test",
+                shared_with=[
+                    SharedExpense(receivable_account="A", offset_account="B", percentage=60),
+                    SharedExpense(receivable_account="C", offset_account="D", percentage=50),
+                ],
+            )
+
+    def test_multiple_shared_expenses(self):
+        """Pattern can have multiple shared expenses (sharing with multiple people)."""
+        pattern = TransactionPattern(
+            narration="RESTAURANT",
+            account="Expenses:Dining",
+            shared_with=[
+                SharedExpense(
+                    receivable_account="Assets:Receivables:Alex",
+                    offset_account="Income:Reimbursements",
+                    percentage=33,
+                ),
+                SharedExpense(
+                    receivable_account="Assets:Receivables:Jordan",
+                    offset_account="Income:Reimbursements",
+                    percentage=33,
+                ),
+            ],
+        )
+        assert len(pattern.shared_with) == 2
+        total = sum(s.percentage for s in pattern.shared_with)
+        assert total == Decimal("66")
+
+    def test_classify_includes_shared_with(self):
+        """classify() returns shared_with in result."""
+        patterns = [
+            TransactionPattern(
+                narration="GROCERIES",
+                account="Expenses:Groceries",
+                shared_with=[
+                    SharedExpense(
+                        receivable_account="Assets:Receivables:Alex",
+                        offset_account="Income:Reimbursements",
+                        percentage=50,
+                    ),
+                ],
+            )
+        ]
+        classifier = TransactionClassifier(patterns)
+        result = classifier.classify("GROCERIES STORE", Decimal("100"))
+
+        assert result is not None
+        assert result.shared_with is not None
+        assert len(result.shared_with) == 1
+        assert result.shared_with[0].percentage == Decimal("50")
