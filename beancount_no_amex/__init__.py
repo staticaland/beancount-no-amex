@@ -5,7 +5,9 @@ from .classify import (
     AccountSplit,
     AmountCondition,
     AmountOperator,
+    ClassificationResult,
     ClassifierMixin,
+    SharedExpense,
     TransactionClassifier,
     TransactionPattern,
     amount,  # Proxy for natural comparison syntax
@@ -27,7 +29,9 @@ __all__ = [
     "AccountSplit",
     "AmountCondition",
     "AmountOperator",
+    "ClassificationResult",
     "ClassifierMixin",
+    "SharedExpense",
     "TransactionClassifier",
     "TransactionPattern",
     "amount",  # Use: amount < 50, amount > 100, amount.between(50, 100)
