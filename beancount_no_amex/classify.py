@@ -183,13 +183,14 @@ class AmountCondition(BaseModel):
 
 
 class TransactionPattern(BaseModel):
-    """Pattern for matching transactions based on narration and/or amount.
+    """Pattern for matching transactions based on narration, amount, and/or fields.
 
     A pattern matches a transaction if ALL specified conditions are met:
     - If narration is specified, it must match (substring or regex)
     - If amount_condition is specified, the amount must satisfy it
+    - If fields is specified, all field patterns must match
 
-    At least one of narration or amount_condition must be specified.
+    At least one of narration, amount_condition, or fields must be specified.
     Either account (single) or splits (multiple accounts) must be specified.
 
     Examples:
@@ -208,6 +209,26 @@ class TransactionPattern(BaseModel):
             narration="VINMONOPOLET",
             amount_condition=amount > 500,
             account="Expenses:Entertainment:Alcohol:Expensive"
+        )
+
+        # Field-based matching (for CSV imports, bank account numbers, etc.)
+        TransactionPattern(
+            fields={"to_account": "98712345678"},
+            account="Assets:Bank:Savings",
+        )
+
+        # Field matching with regex
+        TransactionPattern(
+            fields={"merchant_code": r"5411|5412"},  # Grocery MCCs
+            fields_regex=True,
+            account="Expenses:Groceries",
+        )
+
+        # Combined field + narration matching
+        TransactionPattern(
+            fields={"transaction_type": "ATM"},
+            amount_condition=amount > 500,
+            account="Expenses:Cash:Large",
         )
 
         # Split transaction across multiple accounts
@@ -236,6 +257,8 @@ class TransactionPattern(BaseModel):
     regex: bool = False  # If True, narration is treated as a regex pattern
     case_insensitive: bool = False  # If True, narration matching is case-insensitive
     amount_condition: AmountCondition | None = None
+    fields: dict[str, str] | None = None  # Field name -> pattern for matching
+    fields_regex: bool = False  # If True, field patterns are treated as regex
     account: str | None = None  # Target account (single), mutually exclusive with splits
     splits: list[AccountSplit] | None = None  # Split across multiple accounts
     shared_with: list[SharedExpense] | None = None  # Track shared expenses with others
@@ -246,8 +269,8 @@ class TransactionPattern(BaseModel):
     def validate_pattern(self):
         """Validate pattern configuration."""
         # Must have at least one matching condition
-        if self.narration is None and self.amount_condition is None:
-            raise ValueError("At least one of narration or amount_condition must be specified")
+        if self.narration is None and self.amount_condition is None and self.fields is None:
+            raise ValueError("At least one of narration, amount_condition, or fields must be specified")
 
         # Must have exactly one of account or splits
         if self.account is None and self.splits is None:
@@ -292,12 +315,33 @@ class TransactionPattern(BaseModel):
         # For non-regex, escape special characters for literal matching
         return re.compile(re.escape(self.narration), flags)
 
-    def matches(self, narration: str, amount: Decimal) -> bool:
+    @cached_property
+    def _compiled_field_patterns(self) -> dict[str, re.Pattern] | None:
+        """Lazily compile and cache regex patterns for field matching."""
+        if self.fields is None:
+            return None
+
+        compiled = {}
+        for field_name, pattern in self.fields.items():
+            if self.fields_regex:
+                compiled[field_name] = re.compile(pattern)
+            else:
+                # For non-regex, escape special characters for literal matching
+                compiled[field_name] = re.compile(re.escape(pattern))
+        return compiled
+
+    def matches(
+        self,
+        narration: str,
+        amount: Decimal,
+        fields: dict[str, str] | None = None,
+    ) -> bool:
         """Check if a transaction matches this pattern.
 
         Args:
             narration: The transaction narration/description
             amount: The transaction amount
+            fields: Optional dictionary of field names to values for matching
 
         Returns:
             True if the transaction matches all specified conditions
@@ -310,6 +354,17 @@ class TransactionPattern(BaseModel):
         # Check amount condition
         if self.amount_condition is not None and not self.amount_condition.matches(amount):
             return False
+
+        # Check field conditions
+        if self.fields is not None:
+            if fields is None:
+                return False
+            if self._compiled_field_patterns is None:
+                return False
+            for field_name, pattern in self._compiled_field_patterns.items():
+                field_value = fields.get(field_name, "")
+                if pattern.search(field_value) is None:
+                    return False
 
         return True
 
@@ -443,12 +498,18 @@ class TransactionClassifier:
         if default_split_percentage is not None and default_account is None:
             raise ValueError("default_split_percentage requires default_account to be set")
 
-    def classify(self, narration: str, amount: Decimal) -> ClassificationResult | None:
+    def classify(
+        self,
+        narration: str,
+        amount: Decimal,
+        fields: dict[str, str] | None = None,
+    ) -> ClassificationResult | None:
         """Find the matching account(s) for a transaction.
 
         Args:
             narration: The transaction narration/description
             amount: The transaction amount
+            fields: Optional dictionary of field names to values for matching
 
         Returns:
             A ClassificationResult with splits and shared_with info,
@@ -460,7 +521,7 @@ class TransactionClassifier:
         # Find matching pattern
         matched_pattern = None
         for pattern in self.patterns:
-            if pattern.matches(narration, amount):
+            if pattern.matches(narration, amount, fields):
                 matched_pattern = pattern
                 break
 
@@ -601,6 +662,9 @@ class ClassifierMixin:
     (list of TransactionPattern objects). Optionally, you can also set
     `default_account` and `default_split_percentage` attributes.
 
+    For field-based matching, override the `get_fields()` method to extract
+    fields from your source data format.
+
     Example:
         class MyImporter(ClassifierMixin, beangulp.Importer):
             def __init__(self, config):
@@ -613,12 +677,33 @@ class ClassifierMixin:
                 # Your extraction logic
                 # finalize() is provided by the mixin
                 ...
+
+            # Optional: override to enable field-based matching
+            def get_fields(self, row) -> dict[str, str] | None:
+                return {
+                    "to_account": row.to_account,
+                    "transaction_type": row.type,
+                }
     """
 
     # These attributes should be set by the importer class
     transaction_patterns: list[TransactionPattern]
     default_account: str | None = None
     default_split_percentage: Decimal | None = None
+
+    def get_fields(self, row: Any) -> dict[str, str] | None:
+        """Extract fields from the source row for pattern matching.
+
+        Override this method in your importer to enable field-based matching.
+        The returned dictionary maps field names to string values.
+
+        Args:
+            row: The original source data (format-specific)
+
+        Returns:
+            A dictionary of field names to values, or None if no fields available.
+        """
+        return None
 
     def finalize(self, txn: data.Transaction, row: Any) -> data.Transaction | None:
         """Post-process the transaction with categorization based on patterns.
@@ -653,8 +738,9 @@ class ClassifierMixin:
         )
         narration = txn.narration or ""
         txn_amount = txn.postings[0].units.number
+        fields = self.get_fields(row)
 
-        if result := classifier.classify(narration, txn_amount):
+        if result := classifier.classify(narration, txn_amount, fields):
             return classifier.add_balancing_postings(txn, result)
 
         return txn

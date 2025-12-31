@@ -236,7 +236,7 @@ class TestTransactionPatternValidation:
     """Tests for TransactionPattern validation."""
 
     def test_requires_at_least_one_condition(self):
-        """At least one of narration or amount_condition must be specified."""
+        """At least one of narration, amount_condition, or fields must be specified."""
         with pytest.raises(ValidationError):
             TransactionPattern(account="Expenses:Test")
 
@@ -716,3 +716,217 @@ class TestTransactionPatternSharedWith:
         assert result.shared_with is not None
         assert len(result.shared_with) == 1
         assert result.shared_with[0].percentage == Decimal("50")
+
+
+class TestTransactionPatternFields:
+    """Tests for field-based pattern matching."""
+
+    def test_field_substring_match(self):
+        """Field pattern matches substring by default."""
+        pattern = TransactionPattern(
+            fields={"to_account": "98712345678"},
+            account="Assets:Bank:Savings",
+        )
+        assert pattern.matches("Any narration", Decimal("100"), {"to_account": "98712345678"}) is True
+        assert pattern.matches("Any narration", Decimal("100"), {"to_account": "Transfer to 98712345678"}) is True
+        assert pattern.matches("Any narration", Decimal("100"), {"to_account": "12345678"}) is False
+
+    def test_field_regex_match(self):
+        """Field pattern with regex matching."""
+        pattern = TransactionPattern(
+            fields={"merchant_code": r"5411|5412"},  # Grocery MCCs
+            fields_regex=True,
+            account="Expenses:Groceries",
+        )
+        assert pattern.matches("", Decimal("100"), {"merchant_code": "5411"}) is True
+        assert pattern.matches("", Decimal("100"), {"merchant_code": "5412"}) is True
+        assert pattern.matches("", Decimal("100"), {"merchant_code": "5413"}) is False
+
+    def test_multiple_fields_all_must_match(self):
+        """All field conditions must match (AND logic)."""
+        pattern = TransactionPattern(
+            fields={
+                "transaction_type": "ATM",
+                "location": "OSLO",
+            },
+            account="Expenses:Cash",
+        )
+        assert pattern.matches("", Decimal("100"), {"transaction_type": "ATM", "location": "OSLO"}) is True
+        assert pattern.matches("", Decimal("100"), {"transaction_type": "ATM", "location": "BERGEN"}) is False
+        assert pattern.matches("", Decimal("100"), {"transaction_type": "DEBIT", "location": "OSLO"}) is False
+
+    def test_field_match_with_missing_field(self):
+        """Missing field in input fails match."""
+        pattern = TransactionPattern(
+            fields={"to_account": "12345"},
+            account="Assets:Bank",
+        )
+        # Field not present - should not match
+        assert pattern.matches("", Decimal("100"), {"other_field": "value"}) is False
+        # Empty field value - substring match of "12345" in "" fails
+        assert pattern.matches("", Decimal("100"), {"to_account": ""}) is False
+
+    def test_field_match_with_no_fields_provided(self):
+        """Pattern with fields fails when no fields provided."""
+        pattern = TransactionPattern(
+            fields={"to_account": "12345"},
+            account="Assets:Bank",
+        )
+        assert pattern.matches("", Decimal("100"), None) is False
+        assert pattern.matches("", Decimal("100")) is False
+
+    def test_combined_narration_and_fields(self):
+        """Pattern with both narration and fields requires both to match."""
+        pattern = TransactionPattern(
+            narration="TRANSFER",
+            fields={"to_account": "98712345678"},
+            account="Assets:Bank:Savings",
+        )
+        # Both match
+        assert pattern.matches("TRANSFER TO SAVINGS", Decimal("100"), {"to_account": "98712345678"}) is True
+        # Only narration matches
+        assert pattern.matches("TRANSFER TO SAVINGS", Decimal("100"), {"to_account": "other"}) is False
+        # Only field matches
+        assert pattern.matches("OTHER", Decimal("100"), {"to_account": "98712345678"}) is False
+
+    def test_combined_amount_and_fields(self):
+        """Pattern with both amount and fields requires both to match."""
+        pattern = TransactionPattern(
+            amount_condition=amount > 500,
+            fields={"transaction_type": "ATM"},
+            account="Expenses:Cash:Large",
+        )
+        # Both match
+        assert pattern.matches("", Decimal("600"), {"transaction_type": "ATM"}) is True
+        # Only amount matches
+        assert pattern.matches("", Decimal("600"), {"transaction_type": "DEBIT"}) is False
+        # Only field matches
+        assert pattern.matches("", Decimal("100"), {"transaction_type": "ATM"}) is False
+
+    def test_combined_narration_amount_and_fields(self):
+        """Pattern with narration, amount, and fields requires all to match."""
+        pattern = TransactionPattern(
+            narration="VINMONOPOLET",
+            amount_condition=amount > 500,
+            fields={"store_id": "OSLO"},
+            account="Expenses:Alcohol:Expensive:Oslo",
+        )
+        # All three match
+        assert pattern.matches(
+            "VINMONOPOLET GRUNERLOKKA",
+            Decimal("750"),
+            {"store_id": "OSLO"}
+        ) is True
+        # Narration doesn't match
+        assert pattern.matches(
+            "OTHER STORE",
+            Decimal("750"),
+            {"store_id": "OSLO"}
+        ) is False
+        # Amount doesn't match
+        assert pattern.matches(
+            "VINMONOPOLET GRUNERLOKKA",
+            Decimal("100"),
+            {"store_id": "OSLO"}
+        ) is False
+        # Field doesn't match
+        assert pattern.matches(
+            "VINMONOPOLET GRUNERLOKKA",
+            Decimal("750"),
+            {"store_id": "BERGEN"}
+        ) is False
+
+    def test_field_only_pattern_is_valid(self):
+        """Pattern with only fields (no narration or amount) is valid."""
+        pattern = TransactionPattern(
+            fields={"to_account": "98712345678"},
+            account="Assets:Bank:Savings",
+        )
+        assert pattern.fields is not None
+        assert pattern.narration is None
+        assert pattern.amount_condition is None
+
+    def test_field_pattern_special_chars_escaped_by_default(self):
+        """Special regex characters are escaped in non-regex field patterns."""
+        pattern = TransactionPattern(
+            fields={"note": "Amount (USD)"},
+            account="Expenses:Foreign",
+        )
+        # Should match literally including parentheses
+        assert pattern.matches("", Decimal("100"), {"note": "Amount (USD) 50"}) is True
+        # Without escaping, parentheses would be regex group
+        assert pattern.matches("", Decimal("100"), {"note": "Amount USD"}) is False
+
+
+class TestTransactionClassifierWithFields:
+    """Tests for TransactionClassifier with field-based patterns."""
+
+    def test_classify_with_fields(self):
+        """Classifier passes fields to pattern matching."""
+        patterns = [
+            TransactionPattern(
+                fields={"to_account": "98712345678"},
+                account="Assets:Bank:Savings",
+            ),
+            TransactionPattern(
+                narration="FALLBACK",
+                account="Expenses:Other",
+            ),
+        ]
+        classifier = TransactionClassifier(patterns)
+
+        # Field pattern matches
+        result = classifier.classify("Any", Decimal("100"), {"to_account": "98712345678"})
+        assert result is not None
+        assert result.splits[0].account == "Assets:Bank:Savings"
+
+        # Field pattern doesn't match, fallback narration doesn't match either
+        result = classifier.classify("Any", Decimal("100"), {"to_account": "other"})
+        assert result is None
+
+        # Field pattern doesn't match, but fallback narration matches
+        result = classifier.classify("FALLBACK TRANSACTION", Decimal("100"), {"to_account": "other"})
+        assert result is not None
+        assert result.splits[0].account == "Expenses:Other"
+
+    def test_classify_field_pattern_with_no_fields(self):
+        """Field patterns don't match when no fields provided."""
+        patterns = [
+            TransactionPattern(
+                fields={"to_account": "12345"},
+                account="Assets:Bank",
+            ),
+            TransactionPattern(
+                narration="SPOTIFY",
+                account="Expenses:Music",
+            ),
+        ]
+        classifier = TransactionClassifier(patterns)
+
+        # No fields - field pattern fails, narration pattern matches
+        result = classifier.classify("SPOTIFY PREMIUM", Decimal("9.99"))
+        assert result is not None
+        assert result.splits[0].account == "Expenses:Music"
+
+        # No fields and no narration match
+        result = classifier.classify("UNKNOWN", Decimal("100"))
+        assert result is None
+
+    def test_first_matching_field_pattern_wins(self):
+        """First matching pattern wins (order matters)."""
+        patterns = [
+            TransactionPattern(
+                fields={"type": "ATM"},
+                account="Expenses:Cash:ATM",
+            ),
+            TransactionPattern(
+                fields={"type": "ATM"},
+                amount_condition=amount > 500,
+                account="Expenses:Cash:LargeATM",
+            ),
+        ]
+        classifier = TransactionClassifier(patterns)
+
+        # First pattern matches (even though second would too)
+        result = classifier.classify("", Decimal("600"), {"type": "ATM"})
+        assert result.splits[0].account == "Expenses:Cash:ATM"
