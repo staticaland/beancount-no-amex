@@ -13,6 +13,7 @@ from lxml import etree
 from pydantic import ValidationError
 
 from beancount_no_amex.classify import (
+    AccountSplit,
     ClassifierMixin,
     TransactionPattern,
 )
@@ -46,6 +47,16 @@ class AmexAccountConfig:
                     When None, the importer matches any Amex QBO file.
         transaction_patterns: List of TransactionPattern objects for categorization.
                     Supports substring matching, regex, case-insensitive, and amount conditions.
+                    Patterns can also specify splits for multi-account categorization.
+        default_account: Account for unmatched transactions (e.g., 'Expenses:Uncategorized').
+                    When set, transactions that don't match any pattern go 100% to this account.
+                    When None (default), unmatched transactions have no balancing posting.
+        default_split_percentage: When set (0-100), matched transactions are split between
+                    the matched account(s) and default_account. For example, setting this to 50
+                    means 50% goes to the matched account and 50% to default_account.
+                    Useful for a "review workflow" where you're not fully confident in
+                    classifications. Set to None (default) to disable splitting.
+                    Requires default_account to be set.
         skip_deduplication: When True, skip FITID-based deduplication (default: False).
                            Useful for forcing re-import of transactions.
         generate_balance_assertions: When True, generate balance assertions from QBO
@@ -53,11 +64,12 @@ class AmexAccountConfig:
                            importer to add balance assertions at the end of each statement.
 
     Example:
-        from beancount_no_amex import AmexAccountConfig, TransactionPattern, amount
+        from beancount_no_amex import AmexAccountConfig, TransactionPattern, AccountSplit, amount
 
         config = AmexAccountConfig(
             account_name='Liabilities:CreditCard:Amex',
             currency='NOK',
+            default_account='Expenses:Uncategorized',  # Fallback for unmatched
             transaction_patterns=[
                 # Simple substring match
                 TransactionPattern(narration="SPOTIFY", account="Expenses:Music"),
@@ -68,6 +80,15 @@ class AmexAccountConfig:
                     regex=True,
                     case_insensitive=True,
                     account="Expenses:Groceries"
+                ),
+
+                # Split transaction across multiple accounts
+                TransactionPattern(
+                    narration="COSTCO",
+                    splits=[
+                        AccountSplit(account="Expenses:Groceries", percentage=80),
+                        AccountSplit(account="Expenses:Household", percentage=20),
+                    ]
                 ),
 
                 # Amount-only match (small purchases)
@@ -84,11 +105,22 @@ class AmexAccountConfig:
                 ),
             ],
         )
+
+        # Review workflow: 50% confidence in classifications
+        review_config = AmexAccountConfig(
+            account_name='Liabilities:CreditCard:Amex',
+            currency='NOK',
+            default_account='Expenses:NeedsReview',
+            default_split_percentage=50,  # 50% to matched, 50% to NeedsReview
+            transaction_patterns=[...],
+        )
     """
     account_name: str
     currency: str
     account_id: str | None = None
     transaction_patterns: list[TransactionPattern] = field(default_factory=list)
+    default_account: str | None = None
+    default_split_percentage: int | float | None = None
     skip_deduplication: bool = False
     generate_balance_assertions: bool = False
 
@@ -172,11 +204,20 @@ class Importer(ClassifierMixin, beangulp.Importer):
             flag: Transaction flag (default: "*").
             debug: Enable debug output (default: True).
         """
+        from decimal import Decimal
+
         # Store configuration values from the config object
         self.account_name = config.account_name
         self.currency = config.currency  # Store configured currency
         self.account_id = config.account_id  # Optional account ID for matching
         self.transaction_patterns = config.transaction_patterns
+        self.default_account = config.default_account
+        # Convert to Decimal if set (classifier expects Decimal)
+        self.default_split_percentage = (
+            Decimal(str(config.default_split_percentage))
+            if config.default_split_percentage is not None
+            else None
+        )
         self.skip_deduplication = config.skip_deduplication
         self.generate_balance_assertions = config.generate_balance_assertions
         self.flag = flag

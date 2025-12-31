@@ -15,7 +15,7 @@ from beancount.core.amount import Amount
 from beancount.core.number import D
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
-from beancount_no_amex.classify import TransactionPattern, amount
+from beancount_no_amex.classify import AccountSplit, TransactionPattern, amount
 from beancount_no_amex.models import RawTransaction
 
 
@@ -584,3 +584,302 @@ class TestFinalizeAmountConditions:
 
         assert len(result.postings) == 2
         assert result.postings[1].account == "Expenses:MediumPurchases"
+
+
+class TestFinalizeSplitTransactions:
+    """Tests for split transaction functionality in finalize."""
+
+    @pytest.fixture
+    def importer_with_splits(self):
+        """Importer with split transaction patterns."""
+        config = AmexAccountConfig(
+            account_name="Liabilities:CreditCard:Amex",
+            currency="NOK",
+            transaction_patterns=[
+                TransactionPattern(
+                    narration="COSTCO",
+                    splits=[
+                        AccountSplit(account="Expenses:Groceries", percentage=80),
+                        AccountSplit(account="Expenses:Household", percentage=20),
+                    ],
+                ),
+                TransactionPattern(narration="SPOTIFY", account="Expenses:Music"),
+            ],
+        )
+        return Importer(config=config, debug=False)
+
+    def test_split_creates_multiple_postings(self, importer_with_splits):
+        """Split pattern creates multiple balancing postings."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-100.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="COSTCO WHOLESALE",
+            narration="COSTCO WHOLESALE",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_splits.finalize(txn, RawTransaction())
+
+        # Should have 3 postings: original + 2 splits
+        assert len(result.postings) == 3
+        # First posting is the original
+        assert result.postings[0].account == "Liabilities:CreditCard:Amex"
+        assert result.postings[0].units.number == D("-100.00")
+        # Second posting is 80% of 100 = 80
+        assert result.postings[1].account == "Expenses:Groceries"
+        assert result.postings[1].units.number == D("80.00")
+        # Third posting is 20% of 100 = 20
+        assert result.postings[2].account == "Expenses:Household"
+        assert result.postings[2].units.number == D("20.00")
+
+    def test_split_with_odd_amount(self, importer_with_splits):
+        """Split handles amounts that don't divide evenly."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-123.45"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="COSTCO",
+            narration="COSTCO",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_splits.finalize(txn, RawTransaction())
+
+        # 80% of 123.45 = 98.76
+        assert result.postings[1].units.number == D("98.76")
+        # 20% of 123.45 = 24.69
+        assert result.postings[2].units.number == D("24.69")
+
+    def test_single_account_pattern_still_works(self, importer_with_splits):
+        """Single account patterns work alongside split patterns."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-9.99"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="SPOTIFY PREMIUM",
+            narration="SPOTIFY PREMIUM",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_splits.finalize(txn, RawTransaction())
+
+        # Single account = 2 postings (original + balancing)
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Music"
+        assert result.postings[1].units.number == D("9.99")
+
+
+class TestFinalizeDefaultAccount:
+    """Tests for default account functionality in finalize."""
+
+    @pytest.fixture
+    def importer_with_default(self):
+        """Importer with default_account configured."""
+        config = AmexAccountConfig(
+            account_name="Liabilities:CreditCard:Amex",
+            currency="NOK",
+            default_account="Expenses:Uncategorized",
+            transaction_patterns=[
+                TransactionPattern(narration="SPOTIFY", account="Expenses:Music"),
+            ],
+        )
+        return Importer(config=config, debug=False)
+
+    def test_unmatched_goes_to_default(self, importer_with_default):
+        """Unmatched transactions go to default_account."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-50.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="UNKNOWN MERCHANT",
+            narration="UNKNOWN MERCHANT",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_default.finalize(txn, RawTransaction())
+
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Uncategorized"
+        assert result.postings[1].units.number == D("50.00")
+
+    def test_matched_still_uses_pattern(self, importer_with_default):
+        """Matched transactions still use pattern account, not default."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-9.99"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="SPOTIFY",
+            narration="SPOTIFY",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_default.finalize(txn, RawTransaction())
+
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:Music"
+
+
+class TestFinalizeDefaultSplitPercentage:
+    """Tests for default_split_percentage functionality in finalize."""
+
+    @pytest.fixture
+    def importer_with_review_split(self):
+        """Importer with default_split_percentage for review workflow."""
+        config = AmexAccountConfig(
+            account_name="Liabilities:CreditCard:Amex",
+            currency="NOK",
+            default_account="Expenses:NeedsReview",
+            default_split_percentage=50,  # 50% confidence
+            transaction_patterns=[
+                TransactionPattern(narration="SPOTIFY", account="Expenses:Music"),
+            ],
+        )
+        return Importer(config=config, debug=False)
+
+    def test_matched_splits_with_default_percentage(self, importer_with_review_split):
+        """Matched transactions are split between pattern and review account."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-100.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="SPOTIFY",
+            narration="SPOTIFY",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_review_split.finalize(txn, RawTransaction())
+
+        # 3 postings: original + 50% pattern + 50% review
+        assert len(result.postings) == 3
+        assert result.postings[1].account == "Expenses:Music"
+        assert result.postings[1].units.number == D("50.00")
+        assert result.postings[2].account == "Expenses:NeedsReview"
+        assert result.postings[2].units.number == D("50.00")
+
+    def test_unmatched_goes_fully_to_default(self, importer_with_review_split):
+        """Unmatched transactions go 100% to default_account."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-100.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="UNKNOWN",
+            narration="UNKNOWN",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_review_split.finalize(txn, RawTransaction())
+
+        # Unmatched = 100% to default
+        assert len(result.postings) == 2
+        assert result.postings[1].account == "Expenses:NeedsReview"
+        assert result.postings[1].units.number == D("100.00")
+
+    @pytest.fixture
+    def importer_with_split_and_review(self):
+        """Importer with pattern splits AND default_split_percentage."""
+        config = AmexAccountConfig(
+            account_name="Liabilities:CreditCard:Amex",
+            currency="NOK",
+            default_account="Expenses:NeedsReview",
+            default_split_percentage=50,
+            transaction_patterns=[
+                TransactionPattern(
+                    narration="COSTCO",
+                    splits=[
+                        AccountSplit(account="Expenses:Groceries", percentage=80),
+                        AccountSplit(account="Expenses:Household", percentage=20),
+                    ],
+                ),
+            ],
+        )
+        return Importer(config=config, debug=False)
+
+    def test_pattern_splits_combined_with_review_split(self, importer_with_split_and_review):
+        """Pattern splits are scaled down when combined with review split."""
+        meta = data.new_metadata("test.qbo", 1)
+        primary_posting = data.Posting(
+            "Liabilities:CreditCard:Amex",
+            Amount(D("-100.00"), "NOK"),
+            None, None, None, None,
+        )
+        txn = data.Transaction(
+            meta=meta,
+            date=None,
+            flag="*",
+            payee="COSTCO",
+            narration="COSTCO",
+            tags=data.EMPTY_SET,
+            links=data.EMPTY_SET,
+            postings=[primary_posting],
+        )
+
+        result = importer_with_split_and_review.finalize(txn, RawTransaction())
+
+        # 4 postings: original + scaled groceries + scaled household + review
+        assert len(result.postings) == 4
+        # 80% * 50% = 40%
+        assert result.postings[1].account == "Expenses:Groceries"
+        assert result.postings[1].units.number == D("40.00")
+        # 20% * 50% = 10%
+        assert result.postings[2].account == "Expenses:Household"
+        assert result.postings[2].units.number == D("10.00")
+        # 50% review
+        assert result.postings[3].account == "Expenses:NeedsReview"
+        assert result.postings[3].units.number == D("50.00")
