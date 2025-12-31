@@ -52,7 +52,7 @@ Create `src/finances/importers.py`:
 
 ```python
 from beangulp import Ingest
-from beancount_no_amex import AmexAccountConfig, Importer, TransactionPattern, amount
+from beancount_no_amex import AmexAccountConfig, Importer, match, when, amount
 
 
 def get_importers():
@@ -64,44 +64,27 @@ def get_importers():
             # account_id="XYZ|12345",
             transaction_patterns=[
                 # Simple substring match
-                TransactionPattern(
-                    narration="SPOTIFY",
-                    account="Expenses:Subscriptions:Music",
-                ),
-                # Case-insensitive match
-                TransactionPattern(
-                    narration="netflix",
-                    case_insensitive=True,
-                    account="Expenses:Subscriptions:Streaming",
-                ),
+                match("SPOTIFY") >> "Expenses:Subscriptions:Music",
+                match("NETFLIX") >> "Expenses:Subscriptions:Streaming",
+
+                # Case-insensitive matching
+                match("starbucks").ignorecase >> "Expenses:Coffee",
+
                 # Regex pattern (handles variations like "REMA 1000", "REMA1000")
-                TransactionPattern(
-                    narration=r"REMA\s*1000",
-                    regex=True,
-                    case_insensitive=True,
-                    account="Expenses:Groceries",
-                ),
-                # Amount-only condition (small purchases)
-                TransactionPattern(
-                    amount_condition=amount < 50,
-                    account="Expenses:PettyCash",
-                ),
-                # Amount range
-                TransactionPattern(
-                    amount_condition=amount.between(50, 200),
-                    account="Expenses:Shopping:Medium",
-                ),
+                match(r"REMA\s*1000").regex.ignorecase >> "Expenses:Groceries",
+
+                # Amount-based rules
+                when(amount < 50) >> "Expenses:PettyCash",
+                when(amount.between(50, 200)) >> "Expenses:Shopping:Medium",
+
                 # Combined: merchant + amount threshold
-                TransactionPattern(
-                    narration="VINMONOPOLET",
-                    amount_condition=amount > 500,
-                    account="Expenses:Alcohol:Expensive",
-                ),
+                match("VINMONOPOLET").where(amount > 500) >> "Expenses:Alcohol:Expensive",
+
                 # More examples
-                TransactionPattern(narration="GITHUB", account="Expenses:Cloud:GitHub"),
-                TransactionPattern(narration="AWS", account="Expenses:Cloud:AWS"),
-                TransactionPattern(narration="COOP", account="Expenses:Groceries"),
-                TransactionPattern(narration="KIWI", account="Expenses:Groceries"),
+                match("GITHUB") >> "Expenses:Cloud:GitHub",
+                match("AWS") >> "Expenses:Cloud:AWS",
+                match("COOP") >> "Expenses:Groceries",
+                match("KIWI") >> "Expenses:Groceries",
             ],
         )),
     ]
@@ -178,21 +161,78 @@ uv run fava main.beancount
 
 Open http://localhost:5000 in your browser.
 
+## Classification for Humans
+
+The library provides a Pythonic, fluent API for transaction classification:
+
+```python
+from beancount_no_amex import match, when, field, shared, amount
+
+rules = [
+    # Simple substring matching
+    match("SPOTIFY") >> "Expenses:Music",
+    match("NETFLIX") >> "Expenses:Entertainment",
+
+    # Regex patterns
+    match(r"REMA\s*1000").regex >> "Expenses:Groceries",
+
+    # Case-insensitive matching
+    match("starbucks").ignorecase >> "Expenses:Coffee",
+    match("starbucks").i >> "Expenses:Coffee",  # short form
+
+    # Amount-based rules
+    when(amount < 50) >> "Expenses:PettyCash",
+    when(amount > 1000) >> "Expenses:Large",
+    when(amount.between(100, 500)) >> "Expenses:Medium",
+
+    # Combined conditions
+    match("VINMONOPOLET").where(amount > 500) >> "Expenses:Alcohol:Fine",
+
+    # Field-based matching (for bank account numbers, transaction types, etc.)
+    field(to_account="98712345678") >> "Assets:Savings",
+    field(merchant_code=r"5411|5412").regex >> "Expenses:Groceries",
+
+    # Split across multiple accounts
+    match("COSTCO") >> [
+        ("Expenses:Groceries", 80),
+        ("Expenses:Household", 20),
+    ],
+
+    # Shared expenses (tracking what roommates owe you)
+    match("GROCERIES") >> "Expenses:Groceries" | shared("Assets:Receivables:Alex", 50),
+]
+```
+
+### API Reference
+
+| Pattern Type | Example | Description |
+|--------------|---------|-------------|
+| Substring | `match("SPOTIFY") >> "..."` | Matches if narration contains "SPOTIFY" |
+| Regex | `match(r"REMA\s*1000").regex >> "..."` | Regex pattern matching |
+| Case-insensitive | `match("spotify").ignorecase >> "..."` | Case-insensitive match |
+| Amount less than | `when(amount < 50) >> "..."` | Amount under threshold |
+| Amount greater than | `when(amount > 500) >> "..."` | Amount over threshold |
+| Amount range | `when(amount.between(100, 500)) >> "..."` | Amount within range |
+| Combined | `match("STORE").where(amount > 100) >> "..."` | Narration + amount condition |
+| Field match | `field(type="ATM") >> "..."` | Match on metadata fields |
+| Split | `match("X") >> [("A", 80), ("B", 20)]` | Split across accounts |
+| Shared | `... >> "X" \| shared("Receivable", 50)` | Track shared expenses |
+
+### Traditional API
+
+The fluent API builds on top of `TransactionPattern`, which you can still use directly:
+
+```python
+from beancount_no_amex import TransactionPattern, amount
+
+patterns = [
+    TransactionPattern(narration="SPOTIFY", account="Expenses:Music"),
+    TransactionPattern(narration=r"REMA\s*1000", regex=True, account="Expenses:Groceries"),
+    TransactionPattern(amount_condition=amount < 50, account="Expenses:PettyCash"),
+]
+```
+
 ## Features
-
-### Transaction Pattern Matching
-
-Patterns are evaluated in order - the first match wins:
-
-| Feature | Example |
-|---------|---------|
-| Substring | `TransactionPattern(narration="SPOTIFY", account="...")` |
-| Case-insensitive | `TransactionPattern(narration="netflix", case_insensitive=True, account="...")` |
-| Regex | `TransactionPattern(narration=r"REMA\s*1000", regex=True, account="...")` |
-| Amount less than | `TransactionPattern(amount_condition=amount < 50, account="...")` |
-| Amount greater than | `TransactionPattern(amount_condition=amount > 500, account="...")` |
-| Amount range | `TransactionPattern(amount_condition=amount.between(100, 500), account="...")` |
-| Combined | `TransactionPattern(narration="STORE", amount_condition=amount > 100, account="...")` |
 
 ### Multiple Cards
 
