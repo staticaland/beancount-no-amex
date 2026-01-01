@@ -360,10 +360,21 @@ class Importer(ClassifierMixin, beangulp.Importer):
         is_qbo_file = (
             path.suffix.lower() == ".qbo"
             and mime_type in VALID_MIME_TYPES
-            and path.name.lower().startswith("activity")
         )
 
         if not is_qbo_file:
+            return False
+
+        # Content-based check for OFX/QBO structure (avoid filename coupling)
+        try:
+            with open(filepath, "rb") as f:
+                head = f.read(65536)
+            head_text = head.decode("utf-8", errors="ignore")
+            has_ofx_header = "OFXHEADER" in head_text or "<OFX" in head_text
+            has_statement = any(stmt in head_text for stmt in OFX_STATEMENT_TYPES)
+            if not (has_ofx_header or has_statement):
+                return False
+        except OSError:
             return False
 
         # If no account_id configured, match any Amex QBO file
