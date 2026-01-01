@@ -1,4 +1,5 @@
 import datetime
+import sys
 import traceback
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -295,11 +296,11 @@ class Importer(ClassifierMixin, beangulp.Importer):
 
         except etree.XMLSyntaxError as e:
             if self.debug:
-                print(f"XML syntax error: {e}")
+                print(f"XML syntax error: {e}", file=sys.stderr)
             return QboFileData()
         except Exception as e:
             if self.debug:
-                print(f"Error parsing QBO file: {traceback.format_exc()}")
+                print(f"Error parsing QBO file: {traceback.format_exc()}", file=sys.stderr)
             return QboFileData()
 
     def _determine_currency(self, file_currency: str | None) -> str:
@@ -317,11 +318,11 @@ class Importer(ClassifierMixin, beangulp.Importer):
         """
         if file_currency:
             if self.debug:
-                print(f"Using currency from file: {file_currency}")
+                print(f"Using currency from file: {file_currency}", file=sys.stderr)
             return file_currency
 
         if self.debug:
-            print(f"File currency not found, using default: {self.currency}")
+            print(f"File currency not found, using default: {self.currency}", file=sys.stderr)
 
         # Default currency should never be None, but use DEFAULT_CURRENCY as fallback
         return self.currency or DEFAULT_CURRENCY
@@ -461,7 +462,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
         qbo_data = self._parse_qbo_file(filepath)
         if not qbo_data:  # Check if parsing returned data
             if self.debug:
-                print(f"Skipping file {filepath} due to parsing errors or empty content.")
+                print(f"Skipping file {filepath} due to parsing errors or empty content.", file=sys.stderr)
             return []
 
         # 2. Determine the currency to use
@@ -473,7 +474,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
         if not self.skip_deduplication:
             existing_fitids = self._extract_existing_fitids(existing_entries)
             if self.debug and existing_fitids:
-                print(f"Found {len(existing_fitids)} existing FITIDs for deduplication")
+                print(f"Found {len(existing_fitids)} existing FITIDs for deduplication", file=sys.stderr)
 
         # 4. Process each raw transaction
         for idx, raw_txn in enumerate(qbo_data.transactions, 1):
@@ -481,7 +482,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
                 # 3a. Validate and parse essential raw data
                 if not raw_txn.date:
                     if self.debug:
-                        print(f"Skipping transaction {idx} in {filepath} due to missing date.")
+                        print(f"Skipping transaction {idx} in {filepath} due to missing date.", file=sys.stderr)
                     continue
 
                 txn_date = parse_ofx_time(raw_txn.date).date()
@@ -495,7 +496,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
                 if txn_id and txn_id in existing_fitids:
                     skipped_duplicates += 1
                     if self.debug:
-                        print(f"Skipping duplicate transaction {idx} (FITID: {txn_id})")
+                        print(f"Skipping duplicate transaction {idx} (FITID: {txn_id})", file=sys.stderr)
                     continue
 
                 # Use payee as narration, fallback to memo if payee is missing
@@ -517,7 +518,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
                     amount_decimal = D(amount_str)
                 except Exception as e:
                      if self.debug:
-                         print(f"Skipping transaction {idx} in {filepath} due to invalid amount '{amount_str}': {e}")
+                         print(f"Skipping transaction {idx} in {filepath} due to invalid amount '{amount_str}': {e}", file=sys.stderr)
                      continue
 
                 amount_obj = Amount(amount_decimal, currency)
@@ -543,7 +544,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
                 # Skip if finalization failed or indicated skipping
                 if finalized_txn is None:
                     if self.debug:
-                        print(f"Skipping transaction {idx} in {filepath} after finalization.")
+                        print(f"Skipping transaction {idx} in {filepath} after finalization.", file=sys.stderr)
                     continue
 
                 # 3f. Add the completed transaction to the list
@@ -551,11 +552,11 @@ class Importer(ClassifierMixin, beangulp.Importer):
 
             except (ValueError, ValidationError) as e: # Catch known parsing/validation errors
                 if self.debug:
-                    print(f"Error processing transaction {idx} in {filepath}: {e}\nRaw data: {raw_txn}")
+                    print(f"Error processing transaction {idx} in {filepath}: {e}\nRaw data: {raw_txn}", file=sys.stderr)
                 continue
             except Exception as e: # Catch unexpected errors during processing
                  if self.debug:
-                     print(f"Unexpected error processing transaction {idx} in {filepath}: {e}\n{traceback.format_exc()}")
+                     print(f"Unexpected error processing transaction {idx} in {filepath}: {e}\n{traceback.format_exc()}", file=sys.stderr)
                  continue # Skip to next transaction
 
         # 4. Add balance assertion if enabled and available
@@ -580,15 +581,15 @@ class Importer(ClassifierMixin, beangulp.Importer):
                 )
                 entries.append(balance_entry)
                 if self.debug:
-                    print(f"Added balance assertion for {self.account_name} on {balance_assertion_date}: {balance_amount}")
+                    print(f"Added balance assertion for {self.account_name} on {balance_assertion_date}: {balance_amount}", file=sys.stderr)
 
             except Exception as e: # Catch potential errors creating balance assertion
                  if self.debug:
-                     print(f"Could not create balance assertion for {filepath}: {e}")
+                     print(f"Could not create balance assertion for {filepath}: {e}", file=sys.stderr)
 
         # 6. Report deduplication results
         if self.debug and skipped_duplicates > 0:
-            print(f"Deduplication: skipped {skipped_duplicates} duplicate transaction(s)")
+            print(f"Deduplication: skipped {skipped_duplicates} duplicate transaction(s)", file=sys.stderr)
 
         return entries
 
