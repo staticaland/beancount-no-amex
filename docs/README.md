@@ -177,7 +177,7 @@ Creates a `data.Balance` directive for the day after the statement date.
 **Output (Beancount):**
 ```beancount
 2025-03-20 * "VINMONOPOLET GRUNERLOKKA OSLO"
-  id: "AT250800024000010012345"
+  provider_transaction_id: "AT250800024000010012345"
   type: "DEBIT"
   memo: "LINA HANSEN-81023"
   Liabilities:CreditCard:Amex  -742.18 NOK

@@ -2,10 +2,13 @@
 
 The identify() method determines if a file should be processed by this importer.
 It checks:
-1. File extension (.qbo)
-2. MIME type (application/x-ofx, etc.)
-3. Filename pattern (starts with "activity")
-4. Account ID matching (for multi-account support)
+1. File extension (.qbo) as a cheap pre-filter
+2. OFX content markers (OFXHEADER, <OFX, statement types)
+3. Account ID matching (for multi-account support)
+
+Identification is deliberately independent of the file's name (beyond the
+extension) and of mimetype guesses, both of which reject legitimately
+renamed exports.
 """
 
 from pathlib import Path
@@ -33,24 +36,30 @@ class TestIdentifyBasics:
         txt_file.write_text("not a qbo file")
         assert basic_importer.identify(str(txt_file)) is False
 
-    def test_rejects_wrong_filename_pattern(self, basic_importer, tmp_path):
-        """Rejects .qbo files that don't start with 'activity'."""
-        qbo_file = tmp_path / "statement.qbo"
-        qbo_file.write_text("<?xml version='1.0'?><OFX></OFX>")
+    def test_accepts_any_filename_with_ofx_content(self, basic_importer, tmp_path):
+        """Accepts .qbo files regardless of their base name."""
+        for name in ("statement.qbo", "Activity.qbo", "activity_2025-03.qbo",
+                     "2025-01.qbo"):
+            qbo_file = tmp_path / name
+            qbo_file.write_text("<?xml version='1.0'?><OFX></OFX>")
+            assert basic_importer.identify(str(qbo_file)) is True, name
+
+    def test_rejects_qbo_file_without_ofx_content(self, basic_importer, tmp_path):
+        """Rejects .qbo files whose content is not OFX."""
+        qbo_file = tmp_path / "activity.qbo"
+        qbo_file.write_text("Dato;Beskrivelse;Inn;Ut\n01.01.2025;KIWI;;100,00\n")
         assert basic_importer.identify(str(qbo_file)) is False
 
-    def test_accepts_activity_prefix_case_insensitive(self, basic_importer, tmp_path):
-        """Accepts 'Activity.qbo' (case-insensitive check)."""
-        qbo_file = tmp_path / "Activity.qbo"
-        qbo_file.write_text("<?xml version='1.0'?><OFX></OFX>")
-        # The check uses .lower() so this should work
-        assert basic_importer.identify(str(qbo_file)) is True
+    def test_identifies_monthly_export_fixture(self, basic_importer):
+        """Identifies a monthly export in XML-declaration style.
 
-    def test_accepts_activity_with_date_suffix(self, basic_importer, tmp_path):
-        """Accepts 'activity_2025-03.qbo' (common naming pattern)."""
-        qbo_file = tmp_path / "activity_2025-03.qbo"
-        qbo_file.write_text("<?xml version='1.0'?><OFX></OFX>")
-        assert basic_importer.identify(str(qbo_file)) is True
+        Regression test: exports named by period (e.g. 2025-01.qbo) with an
+        XML declaration before the OFX processing instruction — the format
+        used by the beancounters demo dataset — must identify without any
+        subclass workaround.
+        """
+        fixture = Path(__file__).parent / "fixtures" / "monthly_export.qbo"
+        assert basic_importer.identify(str(fixture)) is True
 
 
 class TestIdentifyWithAccountId:
@@ -147,23 +156,16 @@ class TestIdentifyEdgeCases:
         assert result is False
 
     def test_empty_file(self, basic_importer, tmp_path):
-        """Handles empty files gracefully."""
+        """Rejects empty files (no OFX content)."""
         empty_file = tmp_path / "activity.qbo"
         empty_file.write_text("")
-        # Should return False (can't parse for account_id)
-        # but basic_importer has no account_id, so extension check passes
-        result = basic_importer.identify(str(empty_file))
-        # Extension is .qbo, starts with activity, so might pass initial check
-        # depending on MIME type detection
-        assert isinstance(result, bool)
+        assert basic_importer.identify(str(empty_file)) is False
 
     def test_binary_garbage_file(self, basic_importer, tmp_path):
-        """Handles binary garbage gracefully."""
+        """Rejects binary garbage."""
         garbage_file = tmp_path / "activity.qbo"
         garbage_file.write_bytes(b"\x00\x01\x02\x03\xff\xfe")
-        result = basic_importer.identify(str(garbage_file))
-        # Should return False or handle gracefully
-        assert isinstance(result, bool)
+        assert basic_importer.identify(str(garbage_file)) is False
 
 
 class TestAccountMethod:

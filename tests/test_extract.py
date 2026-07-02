@@ -118,14 +118,14 @@ class TestExtractWithCategorization:
 class TestExtractMetadata:
     """Tests for transaction metadata."""
 
-    def test_transaction_has_id_metadata(self, basic_importer, minimal_qbo_file):
-        """Transaction includes FITID as 'id' metadata."""
+    def test_transaction_has_provider_id_metadata(self, basic_importer, minimal_qbo_file):
+        """Transaction includes FITID as 'provider_transaction_id' metadata."""
         entries = basic_importer.extract(str(minimal_qbo_file), [])
 
         transactions = [e for e in entries if isinstance(e, data.Transaction)]
         txn = transactions[0]
-        assert "id" in txn.meta
-        assert txn.meta["id"] == "TEST001"
+        assert "provider_transaction_id" in txn.meta
+        assert txn.meta["provider_transaction_id"] == "TEST001"
 
     def test_transaction_has_type_metadata(self, basic_importer, minimal_qbo_file):
         """Transaction includes TRNTYPE as 'type' metadata."""
@@ -300,7 +300,7 @@ class TestExtractEdgeCases:
 
         # Only the transaction with a date should be extracted
         assert len(transactions) == 1
-        assert transactions[0].meta["id"] == "HASDATE001"
+        assert transactions[0].meta["provider_transaction_id"] == "HASDATE001"
 
 
 class TestDateMethod:

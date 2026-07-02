@@ -116,9 +116,19 @@ def qbo_with_no_fitid(tmp_path):
     return qbo_file
 
 
-def create_existing_transaction(fitid: str, date: datetime.date, amount: Decimal) -> data.Transaction:
-    """Helper to create a mock existing transaction with a FITID."""
-    meta = {"filename": "existing.beancount", "lineno": 1, "id": fitid}
+def create_existing_transaction(
+    fitid: str,
+    date: datetime.date,
+    amount: Decimal,
+    meta_key: str = "id",
+) -> data.Transaction:
+    """Helper to create a mock existing transaction with a FITID.
+
+    Uses the legacy 'id' metadata key by default so the legacy-ledger
+    deduplication path stays covered; pass meta_key="provider_transaction_id"
+    for the current key.
+    """
+    meta = {"filename": "existing.beancount", "lineno": 1, meta_key: fitid}
     posting = data.Posting(
         "Liabilities:CreditCard:Amex",
         Amount(amount, "NOK"),
@@ -148,6 +158,24 @@ class TestExtractExistingFitids:
         """Extracts FITIDs from transaction metadata."""
         existing = [
             create_existing_transaction("FITID001", datetime.date(2025, 3, 1), D("-100")),
+            create_existing_transaction("FITID002", datetime.date(2025, 3, 2), D("-200")),
+        ]
+
+        fitids = importer_with_deduplication._extract_existing_fitids(existing)
+
+        assert fitids == {"FITID001", "FITID002"}
+
+    def test_extracts_fitids_from_provider_transaction_id_key(
+        self, importer_with_deduplication
+    ):
+        """FITIDs stored under the current 'provider_transaction_id' key are found."""
+        existing = [
+            create_existing_transaction(
+                "FITID001",
+                datetime.date(2025, 3, 1),
+                D("-100"),
+                meta_key="provider_transaction_id",
+            ),
             create_existing_transaction("FITID002", datetime.date(2025, 3, 2), D("-200")),
         ]
 
@@ -222,7 +250,7 @@ class TestDeduplication:
 
         # FITID001 should be skipped, only FITID002 should be imported
         assert len(transactions) == 1
-        assert transactions[0].meta["id"] == "FITID002"
+        assert transactions[0].meta["provider_transaction_id"] == "FITID002"
 
     def test_imports_new_transactions(
         self, importer_with_deduplication, qbo_with_two_transactions
@@ -275,7 +303,7 @@ class TestDeduplication:
 
         # Transaction without FITID should be imported
         assert len(transactions) == 1
-        assert "id" not in transactions[0].meta
+        assert "provider_transaction_id" not in transactions[0].meta
 
 
 # =============================================================================

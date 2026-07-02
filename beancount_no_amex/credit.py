@@ -26,14 +26,16 @@ from beancount_no_amex.models import (
 
 # Constants
 DEFAULT_CURRENCY = "NOK"
+# Metadata key for the provider-assigned transaction ID (OFX FITID). This key
+# is part of the identity contract with downstream tools (e.g. split
+# preservation), which match re-imported transactions by it.
+PROVIDER_ID_META_KEY = "provider_transaction_id"
+# Older versions of this importer wrote the FITID under "id". Deduplication
+# still honors it so existing ledgers keep deduplicating correctly.
+LEGACY_PROVIDER_ID_META_KEY = "id"
 OFX_DATE_FORMAT = "%Y%m%d"
 OFX_DATETIME_FORMAT = "%Y%m%d%H%M%S"
 OFX_STATEMENT_TYPES = ("STMTRS", "CCSTMTRS", "INVSTMTRS")
-VALID_MIME_TYPES = frozenset({
-    "application/x-ofx",
-    "application/vnd.intu.qbo",
-    "application/vnd.intu.qfx",
-})
 
 
 @dataclass
@@ -330,9 +332,9 @@ class Importer(ClassifierMixin, beangulp.Importer):
     def _extract_existing_fitids(self, existing_entries: list[data.Directive]) -> set[str]:
         """Extract all FITIDs from existing entries for deduplication.
 
-        Scans the existing ledger entries for transactions that have an 'id'
-        metadata field (containing the FITID) and returns them as a set for
-        efficient lookup during import.
+        Scans the existing ledger entries for transactions that carry the
+        FITID under 'provider_transaction_id' (or the legacy 'id' key) and
+        returns them as a set for efficient lookup during import.
 
         Args:
             existing_entries: List of existing Beancount directives from the ledger.
@@ -343,7 +345,9 @@ class Importer(ClassifierMixin, beangulp.Importer):
         existing_fitids: set[str] = set()
         for entry in existing_entries:
             if isinstance(entry, data.Transaction):
-                fitid = entry.meta.get("id")
+                fitid = entry.meta.get(PROVIDER_ID_META_KEY) or entry.meta.get(
+                    LEGACY_PROVIDER_ID_META_KEY
+                )
                 if fitid:
                     existing_fitids.add(fitid)
         return existing_fitids
@@ -351,31 +355,27 @@ class Importer(ClassifierMixin, beangulp.Importer):
     def identify(self, filepath: str) -> bool:
         """Check if the file is an American Express QBO statement.
 
+        Identification is content-based: the file must have a .qbo extension
+        (cheap pre-filter) and contain OFX markers. Filename patterns and
+        mimetype guesses are deliberately not used — both are derived from
+        the name only and reject legitimately renamed exports.
+
         When account_id is configured, also verifies that the file's ACCTID matches.
         This enables multiple importers to handle different Amex accounts.
         """
-        path = Path(filepath)
-        mime_type = beangulp.mimetypes.guess_type(filepath, strict=False)[0]
-
-        # Basic file type validation
-        is_qbo_file = (
-            path.suffix.lower() == ".qbo"
-            and mime_type in VALID_MIME_TYPES
-        )
-
-        if not is_qbo_file:
+        if Path(filepath).suffix.lower() != ".qbo":
             return False
 
-        # Content-based check for OFX/QBO structure (avoid filename coupling)
+        # Content-based check for OFX/QBO structure
         try:
             with open(filepath, "rb") as f:
                 head = f.read(65536)
-            head_text = head.decode("utf-8", errors="ignore")
-            has_ofx_header = "OFXHEADER" in head_text or "<OFX" in head_text
-            has_statement = any(stmt in head_text for stmt in OFX_STATEMENT_TYPES)
-            if not (has_ofx_header or has_statement):
-                return False
         except OSError:
+            return False
+        head_text = head.decode("utf-8", errors="ignore")
+        has_ofx_header = "OFXHEADER" in head_text or "<OFX" in head_text
+        has_statement = any(stmt in head_text for stmt in OFX_STATEMENT_TYPES)
+        if not (has_ofx_header or has_statement):
             return False
 
         # If no account_id configured, match any Amex QBO file
@@ -505,7 +505,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
 
                 # Add specific metadata if available
                 if txn_id:
-                    metadata["id"] = txn_id
+                    metadata[PROVIDER_ID_META_KEY] = txn_id
                 if txn_type:
                     metadata["type"] = txn_type
                 # Add memo to metadata only if it's not already used as narration
