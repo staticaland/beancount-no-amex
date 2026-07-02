@@ -21,7 +21,6 @@ from beancount_no_amex.models import (
     RawTransaction,
 )
 
-
 # =============================================================================
 # RawTransaction Tests (Stage 1: Raw XML extraction)
 # =============================================================================

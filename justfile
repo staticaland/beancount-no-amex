@@ -1,45 +1,31 @@
-# Justfile for ruff linting and formatting
+package_path := "src/beancount_no_amex"
 
-path := "beancount_no_amex"
-
-# Default recipe to run when just is called without arguments
 default:
     @just --list
 
-# Lint all files in the specified directory (and any subdirectories)
-check:
-    ruff check {{path}}
-
-# Run pytest unit and component tests
 test:
-    uv run --extra dev pytest tests/ -v
+    uv run pytest tests/ -v
 
-# Run pytest with coverage report
 test-cov:
-    uv run --extra dev pytest tests/ -v --cov=beancount_no_amex --cov-report=term-missing
+    uv run pytest tests/ -v --cov=beancount_no_amex --cov-report=term-missing
 
-# Run all tests
+lint:
+    find src tests -name '*.py' -print | xargs uv run ruff check
+
+typecheck:
+    uv run mypy --no-incremental {{package_path}}
+
+check: lint typecheck test
+
 test-all: test
 
-# Format all files in the specified directory (and any subdirectories)
 format:
-    ruff format {{path}}
+    find src tests -name '*.py' -print | xargs uv run ruff format
 
-# Lint and fix issues automatically where possible
 fix:
-    ruff check --fix {{path}}
+    find src tests -name '*.py' -print | xargs uv run ruff check --fix
 
-isort:
-    ruff check --select I --fix
+all: check
 
-# Show all warnings, even ones that are ignored by default
-check-all:
-    ruff check --select ALL {{path}}
-
-# Runs both check and format
-all: check isort format
-    @echo "Both check and format completed"
-
-# Display ruff version
 version:
-    ruff --version
+    uv run ruff --version

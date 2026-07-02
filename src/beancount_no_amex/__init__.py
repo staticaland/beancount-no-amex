@@ -1,13 +1,5 @@
-from .credit import AmexAccountConfig, Importer  # noqa: F401
-
 # Classification components (re-exported from beancount-classifier)
 from beancount_classifier import (
-    # Fluent API - "Classification for Humans"
-    match,   # match("SPOTIFY") >> "Expenses:Music"
-    when,    # when(amount < 50) >> "Expenses:PettyCash"
-    field,   # field(to_account="12345") >> "Assets:Savings"
-    shared,  # ... | shared("Assets:Receivables:Alex", 50)
-    amount,  # amount < 50, amount > 100, amount.between(50, 100)
     # Core classes (advanced usage)
     AccountSplit,
     AmountCondition,
@@ -17,7 +9,15 @@ from beancount_classifier import (
     SharedExpense,
     TransactionClassifier,
     TransactionPattern,
+    amount,  # amount < 50, amount > 100, amount.between(50, 100)
+    field,  # field(to_account="12345") >> "Assets:Savings"
+    # Fluent API - "Classification for Humans"
+    match,  # match("SPOTIFY") >> "Expenses:Music"
+    shared,  # ... | shared("Assets:Receivables:Alex", 50)
+    when,  # when(amount < 50) >> "Expenses:PettyCash"
 )
+
+from .credit import AmexAccountConfig, Importer  # noqa: F401
 
 # OFX-specific data models
 from .models import (

@@ -9,7 +9,6 @@ transform data from QBO/OFX files:
 """
 
 import datetime
-from pathlib import Path
 
 import pytest
 
@@ -18,7 +17,6 @@ from beancount_no_amex.credit import (
     find_currency,
     parse_ofx_time,
 )
-
 
 # =============================================================================
 # parse_ofx_time() Tests

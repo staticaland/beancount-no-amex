@@ -8,9 +8,8 @@ These tests verify the currency priority system:
 This priority ensures transactions use the most accurate currency.
 """
 
-import pytest
 
-from beancount_no_amex.credit import AmexAccountConfig, Importer, DEFAULT_CURRENCY
+from beancount_no_amex.credit import DEFAULT_CURRENCY, AmexAccountConfig, Importer
 
 
 class TestDetermineCurrency:

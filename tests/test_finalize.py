@@ -7,15 +7,14 @@ The finalize() method applies categorization rules to transactions:
 - Returns the transaction unchanged if no pattern matches
 """
 
-from decimal import Decimal
 
 import pytest
 from beancount.core import data
 from beancount.core.amount import Amount
 from beancount.core.number import D
+from beancount_classifier import AccountSplit, SharedExpense, TransactionPattern, amount
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
-from beancount_classifier import AccountSplit, SharedExpense, TransactionPattern, amount
 from beancount_no_amex.models import RawTransaction
 
 

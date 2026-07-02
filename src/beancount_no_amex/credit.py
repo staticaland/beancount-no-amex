@@ -1,21 +1,21 @@
 import datetime
 import sys
 import traceback
-from pathlib import Path
 from dataclasses import dataclass, field
+from decimal import Decimal
+from pathlib import Path
 
 import beangulp
 from beancount.core import data
 from beancount.core.amount import Amount
 from beancount.core.number import D
-from lxml import etree
-from pydantic import ValidationError
-
 from beancount_classifier import (
-    AccountSplit,
     ClassifierMixin,
     TransactionPattern,
 )
+from lxml import etree
+from pydantic import ValidationError
+
 from beancount_no_amex.models import (
     ParsedTransaction,
     QboFileData,
@@ -298,7 +298,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
             if self.debug:
                 print(f"XML syntax error: {e}", file=sys.stderr)
             return QboFileData()
-        except Exception as e:
+        except Exception:
             if self.debug:
                 print(f"Error parsing QBO file: {traceback.format_exc()}", file=sys.stderr)
             return QboFileData()
@@ -404,7 +404,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
     def date(self, filepath: str) -> datetime.date | None:
         """Extract the latest transaction date from the file."""
         parsed_data = self._parse_qbo_file(filepath)
-        
+
         # Convert raw transactions to parsed transactions
         parsed_transactions = []
         for raw_txn in parsed_data.transactions:
@@ -413,11 +413,11 @@ class Importer(ClassifierMixin, beangulp.Importer):
                     date_val = parse_ofx_time(raw_txn.date).date()
                     parsed_txn = ParsedTransaction(
                         date=date_val,
-                        amount=raw_txn.amount or "0.00",
+                        amount=Decimal(raw_txn.amount or "0.00"),
                         payee=raw_txn.payee,
                         memo=raw_txn.memo,
                         id=raw_txn.id,
-                        type=raw_txn.type
+                        type=raw_txn.type,
                     )
                     parsed_transactions.append(parsed_txn)
             except (ValueError, ValidationError):

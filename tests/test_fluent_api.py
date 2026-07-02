@@ -9,15 +9,14 @@ These tests verify the "classification for humans" API:
 from decimal import Decimal
 
 import pytest
-
 from beancount_classifier import (
-    match,
-    when,
-    field,
-    shared,
-    amount,
     TransactionClassifier,
     TransactionPattern,
+    amount,
+    field,
+    match,
+    shared,
+    when,
 )
 from beancount_classifier.classify import _PatternResult
 
@@ -370,7 +369,7 @@ class TestFluentApiImports:
 
     def test_top_level_imports(self):
         """All fluent API components are importable from top level."""
-        from beancount_no_amex import match, when, field, shared, amount
+        from beancount_no_amex import amount, field, match, shared, when
 
         assert callable(match)
         assert callable(when)
@@ -380,7 +379,7 @@ class TestFluentApiImports:
 
     def test_classifier_module_imports(self):
         """All fluent API components are importable from beancount_classifier."""
-        from beancount_classifier import match, when, field, shared, amount
+        from beancount_classifier import field, match, shared, when
 
         assert callable(match)
         assert callable(when)

@@ -6,21 +6,19 @@ the data flow through the importer.
 """
 
 import datetime
-import tempfile
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from beancount_classifier import TransactionPattern, amount
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
-from beancount_classifier import TransactionPattern, amount
 from beancount_no_amex.models import (
     BeanTransaction,
     ParsedTransaction,
     QboFileData,
     RawTransaction,
 )
-
 
 # =============================================================================
 # Path Fixtures

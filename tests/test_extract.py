@@ -7,13 +7,10 @@ This is where all the pieces come together.
 """
 
 import datetime
-from decimal import Decimal
 
 import pytest
 from beancount.core import data
 from beancount.core.number import D
-
-from beancount_no_amex.credit import AmexAccountConfig, Importer
 
 
 class TestExtractBasics:

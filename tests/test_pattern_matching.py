@@ -10,8 +10,6 @@ These tests verify the pattern matching logic for:
 from decimal import Decimal
 
 import pytest
-from pydantic import ValidationError
-
 from beancount_classifier import (
     AccountSplit,
     AmountCondition,
@@ -22,6 +20,7 @@ from beancount_classifier import (
     TransactionPattern,
     amount,
 )
+from pydantic import ValidationError
 
 
 class TestAmountCondition:

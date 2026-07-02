@@ -17,7 +17,6 @@ from beancount.core.number import D
 
 from beancount_no_amex.credit import AmexAccountConfig, Importer
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================

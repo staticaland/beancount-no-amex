@@ -13,8 +13,6 @@ renamed exports.
 
 from pathlib import Path
 
-import pytest
-
 from beancount_no_amex.credit import AmexAccountConfig, Importer
 
 

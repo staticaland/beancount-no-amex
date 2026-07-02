@@ -25,7 +25,13 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-groups
+
+      - name: Run lint
+        run: find src tests -name '*.py' -print | xargs uv run ruff check
+
+      - name: Run type checks
+        run: uv run mypy --no-incremental src/beancount_no_amex
 
       - name: Run tests
-        run: uv run pytest tests/ -v --tb=short
+        run: uv run pytest tests/ -v
