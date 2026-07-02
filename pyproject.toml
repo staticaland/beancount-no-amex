@@ -39,9 +39,6 @@ dev = [
     "pytest>=9.0.2",
 ]
 
-[project.scripts]
-beancount-no-amex = "beancount_no_amex.credit:main"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

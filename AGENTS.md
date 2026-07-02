@@ -21,7 +21,6 @@ Always prefix commands with `uv run`:
 ```bash
 uv run pytest
 uv run python -c "import beancount_no_amex"
-uv run beancount-no-amex extract file.qbo
 ```
 
 ### Adding Dependencies

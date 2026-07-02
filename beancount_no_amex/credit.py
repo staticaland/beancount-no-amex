@@ -5,8 +5,6 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 import beangulp
-from beangulp import Ingest
-from beangulp.testing import main as test_main
 from beancount.core import data
 from beancount.core.amount import Amount
 from beancount.core.number import D
@@ -592,60 +590,3 @@ class Importer(ClassifierMixin, beangulp.Importer):
             print(f"Deduplication: skipped {skipped_duplicates} duplicate transaction(s)", file=sys.stderr)
 
         return entries
-
-def get_importers() -> list[beangulp.Importer]:
-    """Create and return a list of configured importers.
-
-    Each importer can be configured with:
-    - A unique account_id to match specific QBO files
-    - Different account names for different cards
-    - Separate categorization rules per account
-    """
-    from beancount_classifier import amount
-
-    return [
-        Importer(AmexAccountConfig(
-            account_name='Liabilities:CreditCard:Amex',
-            currency='NOK',
-            transaction_patterns=[
-                TransactionPattern(narration='GITHUB', account='Expenses:Cloud-Services:Github'),
-                TransactionPattern(narration='Fedex', account='Expenses:Postage:FedEx'),
-                TransactionPattern(narration='FREMTIND', account='Expenses:Insurance'),
-                TransactionPattern(narration='VINMONOPOLET', account='Expenses:Groceries'),
-                TransactionPattern(amount_condition=amount < 50, account='Expenses:PettyCash'),
-            ],
-        )),
-    ]
-
-
-def main():
-    """Entry point for the command-line interface.
-
-    Uses beangulp.Ingest for full importer workflow support:
-    - identify: Check which files match which importers
-    - extract: Extract transactions to beancount format
-    - file: Organize source documents (when implemented)
-    - archive: Move processed files (when implemented)
-
-    For testing, run: beancount-no-amex test test_data/
-    """
-    importers = get_importers()
-
-    # Use Ingest for full beangulp workflow (supports multiple importers)
-    ingest = Ingest(importers)
-    ingest.main()
-
-
-def test_main_single():
-    """Alternative entry point for single-importer testing.
-
-    This uses beangulp's testing.main which is simpler but only supports
-    a single importer. Useful for development and basic testing.
-    """
-    importers = get_importers()
-    if importers:
-        test_main(importers[0])
-
-
-if __name__ == '__main__':
-    main()
