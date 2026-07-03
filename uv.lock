@@ -72,7 +72,7 @@ dev = [
 requires-dist = [
     { name = "beancount", specifier = ">=3.1.0" },
     { name = "beancount-classifier", git = "https://github.com/staticaland/beancount-classifier?rev=c5da2f74dbacdad47b92834bfbbb34be664c4758" },
-    { name = "beangulp", specifier = ">=0.2.0" },
+    { name = "beangulp", git = "https://github.com/beancount/beangulp" },
     { name = "lxml", specifier = ">=5.3.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
 ]
@@ -87,19 +87,16 @@ dev = [
 
 [[package]]
 name = "beangulp"
-version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.3.0.dev0"
+source = { git = "https://github.com/beancount/beangulp#d5672c9dbb317842e0f24f1ed7f4b57fa53fa1c6" }
 dependencies = [
     { name = "beancount" },
     { name = "beautifulsoup4" },
     { name = "chardet" },
     { name = "click" },
+    { name = "deprecation" },
     { name = "lxml" },
     { name = "python-magic", marker = "sys_platform != 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/39/e6/5b3307d3035439f60da4372395edec8261852a083278fdbf3a96df0e6395/beangulp-0.2.0.tar.gz", hash = "sha256:5c908c45c62c07c4efadd0b03d3cdd145ad3b5e2bab5f5f277e0093a5891241a", size = 76846, upload-time = "2025-01-20T08:24:17.208Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a8/96/7783234d39c295ef92070dcc0b04451c217e7e907ca5ec28d33f008de339/beangulp-0.2.0-py3-none-any.whl", hash = "sha256:3177f57e433ae0b75352d052e7e20892791e6eab0d95cf07ca458b35b39788fe", size = 90311, upload-time = "2025-01-20T08:24:15.935Z" },
 ]
 
 [[package]]
@@ -218,6 +215,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/da/1c/017a3e1113ed34d998b27d2c6dba08a9e7cb97d362f0ec988fcd873dcf81/coverage-7.12.0-cp314-cp314t-win_amd64.whl", hash = "sha256:e84da3a0fd233aeec797b981c51af1cabac74f9bd67be42458365b30d11b5291", size = 222423, upload-time = "2025-11-18T13:34:15.14Z" },
     { url = "https://files.pythonhosted.org/packages/4c/36/bcc504fdd5169301b52568802bb1b9cdde2e27a01d39fbb3b4b508ab7c2c/coverage-7.12.0-cp314-cp314t-win_arm64.whl", hash = "sha256:01d24af36fedda51c2b1aca56e4330a3710f83b02a5ff3743a6b015ffa7c9384", size = 220459, upload-time = "2025-11-18T13:34:17.222Z" },
     { url = "https://files.pythonhosted.org/packages/ce/a3/43b749004e3c09452e39bb56347a008f0a0668aad37324a99b5c8ca91d9e/coverage-7.12.0-py3-none-any.whl", hash = "sha256:159d50c0b12e060b15ed3d39f87ed43d4f7f7ad40b8a534f4dd331adbb51104a", size = 209503, upload-time = "2025-11-18T13:34:18.892Z" },
+]
+
+[[package]]
+name = "deprecation"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/d3/8ae2869247df154b64c1884d7346d412fed0c49df84db635aab2d1c40e62/deprecation-2.1.0.tar.gz", hash = "sha256:72b3bde64e5d778694b0cf68178aed03d15e15477116add3fb773e581f9518ff", size = 173788, upload-time = "2020-04-20T14:23:38.738Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/02/c3/253a89ee03fc9b9682f1541728eb66db7db22148cd94f89ab22528cd1e1b/deprecation-2.1.0-py2.py3-none-any.whl", hash = "sha256:a10811591210e1fb0e768a8c25517cabeabcba6f0bf96564f8ff45189f90b14a", size = 11178, upload-time = "2020-04-20T14:23:36.581Z" },
 ]
 
 [[package]]

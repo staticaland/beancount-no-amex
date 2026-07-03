@@ -16,6 +16,7 @@ dependencies = [
 package = true
 
 [tool.uv.sources]
+beangulp = { git = "https://github.com/beancount/beangulp" }
 beancount-classifier = { git = "https://github.com/staticaland/beancount-classifier", rev = "c5da2f74dbacdad47b92834bfbbb34be664c4758" }
 
 [build-system]
