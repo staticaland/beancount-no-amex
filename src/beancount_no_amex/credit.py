@@ -52,6 +52,10 @@ class AmexAccountConfig:
         default_account: Account for unmatched transactions (e.g., 'Expenses:Uncategorized').
                     When set, transactions that don't match any pattern go 100% to this account.
                     When None (default), unmatched transactions have no balancing posting.
+        default_expense_account: Default account for unmatched expenses (amount < 0).
+                    Takes precedence over default_account for expenses.
+        default_income_account: Default account for unmatched income (amount > 0,
+                    e.g. refunds). Takes precedence over default_account for income.
         default_split_percentage: When set (0-100), matched transactions are split between
                     the matched account(s) and default_account. For example, setting this to 50
                     means 50% goes to the matched account and 50% to default_account.
@@ -117,10 +121,12 @@ class AmexAccountConfig:
         )
     """
     account_name: str
-    currency: str
+    currency: str = "NOK"
     account_id: str | None = None
     transaction_patterns: list[TransactionPattern] = field(default_factory=list)
     default_account: str | None = None
+    default_expense_account: str | None = None
+    default_income_account: str | None = None
     default_split_percentage: int | float | None = None
     skip_deduplication: bool = False
     generate_balance_assertions: bool = False
@@ -195,7 +201,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
         self,
         config: AmexAccountConfig,  # Accept config object
         flag: str = "*",
-        debug: bool = True,
+        debug: bool = False,
     ):
         """
         Initialize the American Express QBO importer using a configuration object.
@@ -203,7 +209,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
         Args:
             config: An AmexAccountConfig object with account details.
             flag: Transaction flag (default: "*").
-            debug: Enable debug output (default: True).
+            debug: Enable debug output (default: False).
         """
         from decimal import Decimal
 
@@ -213,6 +219,8 @@ class Importer(ClassifierMixin, beangulp.Importer):
         self.account_id = config.account_id  # Optional account ID for matching
         self.transaction_patterns = config.transaction_patterns
         self.default_account = config.default_account
+        self.default_expense = config.default_expense_account
+        self.default_income = config.default_income_account
         # Convert to Decimal if set (classifier expects Decimal)
         self.default_split_percentage = (
             Decimal(str(config.default_split_percentage))

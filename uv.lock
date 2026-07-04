@@ -43,7 +43,7 @@ wheels = [
 [[package]]
 name = "beancount-classifier"
 version = "0.1.0"
-source = { git = "https://github.com/staticaland/beancount-classifier?rev=c5da2f74dbacdad47b92834bfbbb34be664c4758#c5da2f74dbacdad47b92834bfbbb34be664c4758" }
+source = { git = "https://github.com/staticaland/beancount-classifier?rev=92b285ea2ef31b86c43772b0d1387b9bba5aed8b#92b285ea2ef31b86c43772b0d1387b9bba5aed8b" }
 dependencies = [
     { name = "beancount" },
     { name = "pydantic" },
@@ -71,7 +71,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beancount", specifier = ">=3.1.0" },
-    { name = "beancount-classifier", git = "https://github.com/staticaland/beancount-classifier?rev=c5da2f74dbacdad47b92834bfbbb34be664c4758" },
+    { name = "beancount-classifier", git = "https://github.com/staticaland/beancount-classifier?rev=92b285ea2ef31b86c43772b0d1387b9bba5aed8b" },
     { name = "beangulp", git = "https://github.com/beancount/beangulp" },
     { name = "lxml", specifier = ">=5.3.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
