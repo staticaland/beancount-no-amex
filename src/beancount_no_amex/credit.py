@@ -34,6 +34,11 @@ LEGACY_PROVIDER_ID_META_KEY = "id"
 OFX_DATE_FORMAT = "%Y%m%d"
 OFX_DATETIME_FORMAT = "%Y%m%d%H%M%S"
 OFX_STATEMENT_TYPES = ("STMTRS", "CCSTMTRS", "INVSTMTRS")
+# Descriptions of settlement payments on Norwegian Amex statements. Unlike
+# DNB, Amex has no single canonical payment description, so this is a
+# (configurable) list of case-insensitive substrings. "AUTOGIROBETALING" is
+# the direct-debit settlement from the linked bank account.
+DEFAULT_PAYMENT_PATTERNS = ("AUTOGIROBETALING",)
 
 
 @dataclass
@@ -62,6 +67,13 @@ class AmexAccountConfig:
                     Useful for a "review workflow" where you're not fully confident in
                     classifications. Set to None (default) to disable splitting.
                     Requires default_account to be set.
+        skip_payments: When True, skip settlement payment entries (default: False).
+                           Enable this when the paying bank account is imported
+                           too and classifies the settlement transfer itself, so
+                           the transfer is booked exactly once, from the bank side.
+        payment_patterns: Case-insensitive substrings that identify a settlement
+                           payment in the transaction description. Only used when
+                           skip_payments is True. Defaults to ("AUTOGIROBETALING",).
         skip_deduplication: When True, skip FITID-based deduplication (default: False).
                            Useful for forcing re-import of transactions.
         generate_balance_assertions: When True, generate balance assertions from QBO
@@ -128,6 +140,8 @@ class AmexAccountConfig:
     default_expense_account: str | None = None
     default_income_account: str | None = None
     default_split_percentage: int | float | None = None
+    skip_payments: bool = False
+    payment_patterns: tuple[str, ...] = DEFAULT_PAYMENT_PATTERNS
     skip_deduplication: bool = False
     generate_balance_assertions: bool = False
 
@@ -226,6 +240,10 @@ class Importer(ClassifierMixin, beangulp.Importer):
             Decimal(str(config.default_split_percentage))
             if config.default_split_percentage is not None
             else None
+        )
+        self.skip_payments = config.skip_payments
+        self.payment_patterns = tuple(
+            pattern.upper() for pattern in config.payment_patterns
         )
         self.skip_deduplication = config.skip_deduplication
         self.generate_balance_assertions = config.generate_balance_assertions
@@ -497,6 +515,15 @@ class Importer(ClassifierMixin, beangulp.Importer):
                 memo = raw_txn.memo or ""
                 txn_id = raw_txn.id
                 txn_type = raw_txn.type
+
+                # Skip settlement payment entries if configured
+                description = (payee or memo or "").upper()
+                if self.skip_payments and any(
+                    pattern in description for pattern in self.payment_patterns
+                ):
+                    if self.debug:
+                        print(f"Skipping payment entry {idx} ({payee or memo})", file=sys.stderr)
+                    continue
 
                 # 4a. Check for duplicate FITID
                 if txn_id and txn_id in existing_fitids:

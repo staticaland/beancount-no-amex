@@ -319,3 +319,96 @@ class TestDateMethod:
 
         result = basic_importer.date(str(empty_file))
         assert result == datetime.date.today()
+
+
+class TestSkipPayments:
+    """Tests for skipping settlement payment entries (skip_payments=True)."""
+
+    QBO_WITH_PAYMENT = '''<?xml version="1.0"?>
+<OFX>
+  <CREDITCARDMSGSRSV1>
+    <CCSTMTRS>
+      <CURDEF>NOK</CURDEF>
+      <BANKTRANLIST>
+        <STMTTRN>
+          <TRNTYPE>CREDIT</TRNTYPE>
+          <DTPOSTED>20250321</DTPOSTED>
+          <TRNAMT>5307.90</TRNAMT>
+          <FITID>PAYMENT001</FITID>
+          <NAME>AUTOGIROBETALING</NAME>
+          <MEMO>Payment from bank</MEMO>
+        </STMTTRN>
+        <STMTTRN>
+          <TRNTYPE>DEBIT</TRNTYPE>
+          <DTPOSTED>20250320</DTPOSTED>
+          <TRNAMT>-100.00</TRNAMT>
+          <FITID>PURCHASE001</FITID>
+          <NAME>TEST MERCHANT</NAME>
+        </STMTTRN>
+      </BANKTRANLIST>
+      <LEDGERBAL>
+        <BALAMT>-100.00</BALAMT>
+        <DTASOF>20250331</DTASOF>
+      </LEDGERBAL>
+    </CCSTMTRS>
+  </CREDITCARDMSGSRSV1>
+</OFX>'''
+
+    def _extract(self, tmp_path, **config_kwargs):
+        from beancount_no_amex.credit import AmexAccountConfig, Importer
+
+        qbo_file = tmp_path / "activity.qbo"
+        qbo_file.write_text(self.QBO_WITH_PAYMENT)
+        importer = Importer(
+            config=AmexAccountConfig(
+                account_name="Liabilities:CreditCard:Amex",
+                currency="NOK",
+                **config_kwargs,
+            )
+        )
+        return importer.extract(str(qbo_file), [])
+
+    def test_payments_are_extracted_by_default(self, tmp_path):
+        """Without skip_payments, the settlement payment is imported."""
+        entries = self._extract(tmp_path)
+        transactions = [e for e in entries if isinstance(e, data.Transaction)]
+
+        assert len(transactions) == 2
+        assert any(t.narration == "AUTOGIROBETALING" for t in transactions)
+
+    def test_skip_payments_drops_settlement_entries(self, tmp_path):
+        """With skip_payments=True, only the purchase remains."""
+        entries = self._extract(tmp_path, skip_payments=True)
+        transactions = [e for e in entries if isinstance(e, data.Transaction)]
+
+        assert len(transactions) == 1
+        assert transactions[0].meta["provider_transaction_id"] == "PURCHASE001"
+
+    def test_skip_payments_matches_case_insensitively(self, tmp_path):
+        """Pattern matching ignores case in both pattern and description."""
+        entries = self._extract(
+            tmp_path, skip_payments=True, payment_patterns=("autogiro",)
+        )
+        transactions = [e for e in entries if isinstance(e, data.Transaction)]
+
+        assert len(transactions) == 1
+        assert transactions[0].narration == "TEST MERCHANT"
+
+    def test_skip_payments_keeps_balance_assertion(self, tmp_path):
+        """Skipping payments does not suppress the balance assertion."""
+        entries = self._extract(
+            tmp_path, skip_payments=True, generate_balance_assertions=True
+        )
+        balances = [e for e in entries if isinstance(e, data.Balance)]
+
+        assert len(balances) == 1
+        assert balances[0].amount.number == D("-100.00")
+
+    def test_custom_pattern_not_matching_keeps_payment(self, tmp_path):
+        """Only configured patterns are skipped."""
+        entries = self._extract(
+            tmp_path, skip_payments=True, payment_patterns=("BETALT",)
+        )
+        transactions = [e for e in entries if isinstance(e, data.Transaction)]
+
+        assert len(transactions) == 2
