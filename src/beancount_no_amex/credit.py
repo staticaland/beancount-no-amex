@@ -13,6 +13,7 @@ from beancount_classifier import (
     ClassifierMixin,
     TransactionPattern,
 )
+from beangulp import extract
 from lxml import etree
 from pydantic import ValidationError
 
@@ -249,6 +250,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
         self.generate_balance_assertions = config.generate_balance_assertions
         self.flag = flag
         self.debug = debug
+        self.dedup_window = datetime.timedelta(days=3)
 
     def _parse_qbo_file(self, filepath: str) -> QboFileData:
         """Parse the QBO file and extract transactions and balance info using lxml."""
@@ -376,6 +378,27 @@ class Importer(ClassifierMixin, beangulp.Importer):
                     existing_fitids.add(fitid)
         return existing_fitids
 
+    def _get_fitid(self, entry: data.Directive) -> str | None:
+        if not isinstance(entry, data.Transaction):
+            return None
+        fitid = entry.meta.get(PROVIDER_ID_META_KEY) or entry.meta.get(
+            LEGACY_PROVIDER_ID_META_KEY
+        )
+        return str(fitid) if fitid else None
+
+    def _same_fitid(self, entry: data.Directive, target: data.Directive) -> bool:
+        entry_fitid = self._get_fitid(entry)
+        target_fitid = self._get_fitid(target)
+        return bool(entry_fitid and target_fitid and entry_fitid == target_fitid)
+
+    def deduplicate(
+        self, entries: list[data.Directive], existing: list[data.Directive]
+    ) -> None:
+        """Mark duplicates by exact FITID instead of Beangulp's fuzzy default."""
+        if self.skip_deduplication:
+            return
+        extract.mark_duplicate_entries(entries, existing, self.dedup_window, self._same_fitid)
+
     def identify(self, filepath: str) -> bool:
         """Check if the file is an American Express QBO statement.
 
@@ -465,7 +488,8 @@ class Importer(ClassifierMixin, beangulp.Importer):
         to the currency specified in the importer configuration.
 
         Deduplication is performed using FITID (Financial Transaction ID) matching.
-        Transactions with FITIDs that already exist in the ledger are skipped.
+        Transactions with FITIDs that already exist in the ledger are marked as
+        duplicates so Beangulp can print them commented for review.
         This can be disabled by setting skip_deduplication=True in the config.
 
         Balance assertions are only generated if generate_balance_assertions=True
@@ -478,7 +502,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
 
         Returns:
             List of extracted Beancount directives (Transactions, and optionally
-            Balance assertions), excluding any duplicates found in existing_entries.
+            Balance assertions), with duplicates marked when found in existing_entries.
         """
         entries = []
 
@@ -491,14 +515,6 @@ class Importer(ClassifierMixin, beangulp.Importer):
 
         # 2. Determine the currency to use
         currency = self._determine_currency(qbo_data.currency)
-
-        # 3. Extract existing FITIDs for deduplication
-        existing_fitids: set[str] = set()
-        skipped_duplicates = 0
-        if not self.skip_deduplication:
-            existing_fitids = self._extract_existing_fitids(existing_entries)
-            if self.debug and existing_fitids:
-                print(f"Found {len(existing_fitids)} existing FITIDs for deduplication", file=sys.stderr)
 
         # 4. Process each raw transaction
         for idx, raw_txn in enumerate(qbo_data.transactions, 1):
@@ -523,13 +539,6 @@ class Importer(ClassifierMixin, beangulp.Importer):
                 ):
                     if self.debug:
                         print(f"Skipping payment entry {idx} ({payee or memo})", file=sys.stderr)
-                    continue
-
-                # 4a. Check for duplicate FITID
-                if txn_id and txn_id in existing_fitids:
-                    skipped_duplicates += 1
-                    if self.debug:
-                        print(f"Skipping duplicate transaction {idx} (FITID: {txn_id})", file=sys.stderr)
                     continue
 
                 # Use payee as narration, fallback to memo if payee is missing
@@ -620,8 +629,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
                  if self.debug:
                      print(f"Could not create balance assertion for {filepath}: {e}", file=sys.stderr)
 
-        # 6. Report deduplication results
-        if self.debug and skipped_duplicates > 0:
-            print(f"Deduplication: skipped {skipped_duplicates} duplicate transaction(s)", file=sys.stderr)
+        if existing_entries:
+            self.deduplicate(entries, existing_entries)
 
         return entries

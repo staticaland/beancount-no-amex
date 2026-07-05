@@ -1,7 +1,7 @@
 """Tests for FITID-based transaction deduplication.
 
 These tests verify that:
-1. Transactions with FITIDs matching existing entries are skipped
+1. Transactions with FITIDs matching existing entries are marked as duplicates
 2. New transactions (no matching FITID) are imported
 3. The skip_deduplication config option bypasses deduplication
 4. Transactions without FITIDs are always imported
@@ -236,10 +236,10 @@ class TestExtractExistingFitids:
 class TestDeduplication:
     """Tests for FITID-based deduplication during extraction."""
 
-    def test_skips_duplicate_transactions(
+    def test_marks_duplicate_transactions(
         self, importer_with_deduplication, qbo_with_two_transactions
     ):
-        """Transactions with matching FITIDs in existing entries are skipped."""
+        """Transactions with matching FITIDs in existing entries are marked."""
         existing = [
             create_existing_transaction("FITID001", datetime.date(2025, 3, 20), D("-100")),
         ]
@@ -247,9 +247,11 @@ class TestDeduplication:
         entries = importer_with_deduplication.extract(str(qbo_with_two_transactions), existing)
         transactions = [e for e in entries if isinstance(e, data.Transaction)]
 
-        # FITID001 should be skipped, only FITID002 should be imported
-        assert len(transactions) == 1
-        assert transactions[0].meta["provider_transaction_id"] == "FITID002"
+        assert len(transactions) == 2
+        assert transactions[0].meta["provider_transaction_id"] == "FITID001"
+        assert "__duplicate__" in transactions[0].meta
+        assert transactions[1].meta["provider_transaction_id"] == "FITID002"
+        assert "__duplicate__" not in transactions[1].meta
 
     def test_imports_new_transactions(
         self, importer_with_deduplication, qbo_with_two_transactions
@@ -265,10 +267,10 @@ class TestDeduplication:
         # Both transactions should be imported (no matching FITIDs)
         assert len(transactions) == 2
 
-    def test_skips_all_duplicates(
+    def test_marks_all_duplicates(
         self, importer_with_deduplication, qbo_with_two_transactions
     ):
-        """All duplicate transactions are skipped when all FITIDs match."""
+        """All duplicate transactions are marked when all FITIDs match."""
         existing = [
             create_existing_transaction("FITID001", datetime.date(2025, 3, 20), D("-100")),
             create_existing_transaction("FITID002", datetime.date(2025, 3, 21), D("-200")),
@@ -277,8 +279,8 @@ class TestDeduplication:
         entries = importer_with_deduplication.extract(str(qbo_with_two_transactions), existing)
         transactions = [e for e in entries if isinstance(e, data.Transaction)]
 
-        # Both transactions should be skipped
-        assert len(transactions) == 0
+        assert len(transactions) == 2
+        assert all("__duplicate__" in txn.meta for txn in transactions)
 
     def test_empty_existing_entries_imports_all(
         self, importer_with_deduplication, qbo_with_two_transactions
@@ -303,6 +305,21 @@ class TestDeduplication:
         # Transaction without FITID should be imported
         assert len(transactions) == 1
         assert "provider_transaction_id" not in transactions[0].meta
+        assert "__duplicate__" not in transactions[0].meta
+
+    def test_same_day_same_amount_different_fitid_is_not_duplicate(
+        self, importer_with_deduplication, qbo_with_two_transactions
+    ):
+        """Exact FITIDs prevent Beangulp's fuzzy comparator from false positives."""
+        existing = [
+            create_existing_transaction("DIFFERENT_FITID", datetime.date(2025, 3, 20), D("-100")),
+        ]
+
+        entries = importer_with_deduplication.extract(str(qbo_with_two_transactions), existing)
+        transactions = [e for e in entries if isinstance(e, data.Transaction)]
+
+        assert len(transactions) == 2
+        assert "__duplicate__" not in transactions[0].meta
 
 
 # =============================================================================
@@ -327,6 +344,7 @@ class TestSkipDeduplication:
 
         # Both transactions should be imported despite matching FITIDs
         assert len(transactions) == 2
+        assert all("__duplicate__" not in txn.meta for txn in transactions)
 
     def test_skip_deduplication_default_is_false(self, config_with_deduplication):
         """Default value for skip_deduplication is False."""
@@ -358,9 +376,10 @@ class TestDeduplicationWithRealFile:
         second_import = importer_with_deduplication.extract(str(sample_qbo_path), first_import)
         second_transactions = [e for e in second_import if isinstance(e, data.Transaction)]
 
-        # All transactions from first import should be skipped in second import
+        # All transactions from first import should be marked in second import
         assert len(first_transactions) == 9  # Sample file has 9 transactions
-        assert len(second_transactions) == 0
+        assert len(second_transactions) == 9
+        assert all("__duplicate__" in txn.meta for txn in second_transactions)
 
     def test_partial_deduplication_with_sample_file(
         self, importer_with_deduplication, sample_qbo_path
@@ -376,8 +395,9 @@ class TestDeduplicationWithRealFile:
         # Keep only first 5 transactions as "existing"
         partial_existing = first_transactions[:5]
 
-        # Second import should only import the remaining 4 transactions
+        # Second import should mark only the first 5 transactions as duplicates.
         second_import = importer_with_deduplication.extract(str(sample_qbo_path), partial_existing)
         second_transactions = [e for e in second_import if isinstance(e, data.Transaction)]
 
-        assert len(second_transactions) == 4
+        assert len(second_transactions) == 9
+        assert sum("__duplicate__" in txn.meta for txn in second_transactions) == 5
