@@ -195,9 +195,9 @@ class TestFilenameMethod:
     """Tests for the filename() method."""
 
     def test_basic_filename_without_account_id(self, basic_importer, minimal_qbo_file):
-        """Filename without account_id uses simple prefix."""
+        """Filename includes the provider and account leaf."""
         result = basic_importer.filename(str(minimal_qbo_file))
-        assert result == "amex_qbo.activity.qbo"
+        assert result == "amex.Amex.activity.qbo"
 
     def test_filename_with_account_id_includes_suffix(
         self, importer_with_account_id, minimal_qbo_file
@@ -205,7 +205,7 @@ class TestFilenameMethod:
         """Filename with account_id includes account name suffix."""
         result = importer_with_account_id.filename(str(minimal_qbo_file))
         # Account is "Liabilities:CreditCard:Amex:Personal", so suffix is "Personal"
-        assert result == "amex_qbo.Personal.activity.qbo"
+        assert result == "amex.Personal.activity.qbo"
 
     def test_filename_preserves_original_basename(self, basic_importer, tmp_path):
         """Original filename is preserved in the result."""

@@ -454,17 +454,10 @@ class Importer(ClassifierMixin, beangulp.Importer):
         return self.account_name
 
     def filename(self, filepath: str) -> str:
-        """Generate a descriptive filename for the imported data.
-
-        When account_id is configured, includes the account suffix for disambiguation.
-        E.g., 'amex_qbo.Personal.activity.qbo' for 'Liabilities:CreditCard:Amex:Personal'
-        """
+        """Generate a provider/account/original filename for archived data."""
         base_name = Path(filepath).name
-        if self.account_id:
-            # Use last component of account name for disambiguation
-            account_suffix = self.account_name.split(":")[-1]
-            return f"amex_qbo.{account_suffix}.{base_name}"
-        return f"amex_qbo.{base_name}"
+        account_leaf = self.account_name.split(":")[-1]
+        return f"amex.{account_leaf}.{base_name}"
 
     def date(self, filepath: str) -> datetime.date | None:
         """Extract the latest transaction date from the file."""
@@ -489,7 +482,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
                 continue
 
         if not parsed_transactions:
-            return datetime.date.today()
+            return None
 
         latest_date = max(t.date for t in parsed_transactions)
         return latest_date

@@ -312,13 +312,13 @@ class TestDateMethod:
         # The sample file has transactions dated 2025-03-19 and 2025-03-20
         assert result == datetime.date(2025, 3, 20)
 
-    def test_returns_today_for_empty_file(self, basic_importer, tmp_path):
-        """date() returns today's date for files with no valid transactions."""
+    def test_returns_none_for_empty_file(self, basic_importer, tmp_path):
+        """date() returns None for files with no valid transactions."""
         empty_file = tmp_path / "activity.qbo"
         empty_file.write_text("<OFX></OFX>")
 
         result = basic_importer.date(str(empty_file))
-        assert result == datetime.date.today()
+        assert result is None
 
 
 class TestSkipPayments:
