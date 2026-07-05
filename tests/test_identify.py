@@ -13,7 +13,7 @@ renamed exports.
 
 from pathlib import Path
 
-from beancount_no_amex.credit import AmexAccountConfig, Importer
+from beancount_no_amex.credit import Config, Importer
 
 
 class TestIdentifyBasics:
@@ -82,7 +82,7 @@ class TestIdentifyWithAccountId:
   </CREDITCARDMSGSRSV1>
 </OFX>''')
 
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             account_id="XYZ|98765",  # Different from file
@@ -120,7 +120,7 @@ class TestIdentifyWithAccountId:
 
         # Create importers for each account
         personal_importer = Importer(
-            config=AmexAccountConfig(
+            config=Config(
                 account_name="Liabilities:CreditCard:Amex:Personal",
                 currency="NOK",
                 account_id="PERSONAL|111",
@@ -128,7 +128,7 @@ class TestIdentifyWithAccountId:
             debug=False,
         )
         business_importer = Importer(
-            config=AmexAccountConfig(
+            config=Config(
                 account_name="Liabilities:CreditCard:Amex:Business",
                 currency="NOK",
                 account_id="BUSINESS|222",
@@ -183,7 +183,7 @@ class TestAccountMethod:
         ]
 
         for account_name, _ in configs:
-            config = AmexAccountConfig(
+            config = Config(
                 account_name=account_name,
                 currency="NOK",
             )

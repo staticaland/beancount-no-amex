@@ -49,7 +49,7 @@ beancount_no_amex/
 |--------|----------|------------|
 | `classify.py` | `TransactionPattern`, `AmountCondition`, `ClassifierMixin` | beancount, pydantic |
 | `models.py` | `RawTransaction`, `ParsedTransaction`, `QboFileData` | classify.py (re-exports) |
-| `credit.py` | `Importer`, `AmexAccountConfig`, OFX parsing | classify.py, models.py, beangulp |
+| `credit.py` | `Importer`, `Config`, OFX parsing | classify.py, models.py, beangulp |
 
 ### Import Conventions
 

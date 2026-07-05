@@ -190,12 +190,12 @@ Configure multiple importers to handle different Amex cards:
 
 ```python
 importers = [
-    Importer(AmexAccountConfig(
+    Importer(Config(
         account_name='Liabilities:CreditCard:Amex:Personal',
         currency='NOK',
         account_id='XYZ|12345',  # Only matches this card
     )),
-    Importer(AmexAccountConfig(
+    Importer(Config(
         account_name='Liabilities:CreditCard:Amex:Business',
         currency='NOK',
         account_id='XYZ|67890',  # Only matches this card

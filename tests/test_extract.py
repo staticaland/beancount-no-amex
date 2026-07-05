@@ -355,12 +355,12 @@ class TestSkipPayments:
 </OFX>'''
 
     def _extract(self, tmp_path, **config_kwargs):
-        from beancount_no_amex.credit import AmexAccountConfig, Importer
+        from beancount_no_amex.credit import Config, Importer
 
         qbo_file = tmp_path / "activity.qbo"
         qbo_file.write_text(self.QBO_WITH_PAYMENT)
         importer = Importer(
-            config=AmexAccountConfig(
+            config=Config(
                 account_name="Liabilities:CreditCard:Amex",
                 currency="NOK",
                 **config_kwargs,

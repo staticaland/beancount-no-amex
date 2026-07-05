@@ -17,7 +17,7 @@ from beancount_classifier import (
     when,  # when(amount < 50) >> "Expenses:PettyCash"
 )
 
-from .credit import AmexAccountConfig, Importer  # noqa: F401
+from .importer import AmexAccountConfig, AmexConfig, Config, Importer  # noqa: F401
 
 # OFX-specific data models
 from .models import (
@@ -30,6 +30,8 @@ from .models import (
 __all__ = [
     # Main importer classes
     "AmexAccountConfig",
+    "AmexConfig",
+    "Config",
     "Importer",
     # Fluent API - "Classification for Humans"
     "match",   # match("SPOTIFY") >> "Expenses:Music"

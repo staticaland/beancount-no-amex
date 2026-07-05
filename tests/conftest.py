@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from beancount_classifier import TransactionPattern, amount
 
-from beancount_no_amex.credit import AmexAccountConfig, Importer
+from beancount_no_amex.credit import Config, Importer
 from beancount_no_amex.models import (
     BeanTransaction,
     ParsedTransaction,
@@ -155,18 +155,18 @@ def qbo_file_data(raw_transaction_debit, raw_transaction_credit) -> QboFileData:
 
 
 @pytest.fixture
-def basic_config() -> AmexAccountConfig:
+def basic_config() -> Config:
     """Basic importer configuration without account_id filtering."""
-    return AmexAccountConfig(
+    return Config(
         account_name="Liabilities:CreditCard:Amex",
         currency="NOK",
     )
 
 
 @pytest.fixture
-def config_with_balance_assertions() -> AmexAccountConfig:
+def config_with_balance_assertions() -> Config:
     """Configuration with balance assertions enabled."""
-    return AmexAccountConfig(
+    return Config(
         account_name="Liabilities:CreditCard:Amex",
         currency="NOK",
         generate_balance_assertions=True,
@@ -174,9 +174,9 @@ def config_with_balance_assertions() -> AmexAccountConfig:
 
 
 @pytest.fixture
-def config_with_mappings() -> AmexAccountConfig:
+def config_with_mappings() -> Config:
     """Configuration with transaction patterns for categorization."""
-    return AmexAccountConfig(
+    return Config(
         account_name="Liabilities:CreditCard:Amex",
         currency="NOK",
         transaction_patterns=[
@@ -190,9 +190,9 @@ def config_with_mappings() -> AmexAccountConfig:
 
 
 @pytest.fixture
-def config_with_account_id() -> AmexAccountConfig:
+def config_with_account_id() -> Config:
     """Configuration for a specific account (multi-account support)."""
-    return AmexAccountConfig(
+    return Config(
         account_name="Liabilities:CreditCard:Amex:Personal",
         currency="NOK",
         account_id="XYZ|98765",
@@ -203,9 +203,9 @@ def config_with_account_id() -> AmexAccountConfig:
 
 
 @pytest.fixture
-def config_with_patterns() -> AmexAccountConfig:
+def config_with_patterns() -> Config:
     """Configuration with advanced patterns: regex, case-insensitive, amounts."""
-    return AmexAccountConfig(
+    return Config(
         account_name="Liabilities:CreditCard:Amex",
         currency="NOK",
         transaction_patterns=[

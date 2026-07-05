@@ -52,12 +52,12 @@ Create `src/finances/importers.py`:
 
 ```python
 from beangulp import Ingest
-from beancount_no_amex import AmexAccountConfig, Importer, match, when, amount
+from beancount_no_amex import Config, Importer, match, when, amount
 
 
 def get_importers():
     return [
-        Importer(AmexAccountConfig(
+        Importer(Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             # Optional: specify account_id to match a specific card
@@ -241,13 +241,13 @@ Configure separate importers for different Amex cards:
 ```python
 def get_importers():
     return [
-        Importer(AmexAccountConfig(
+        Importer(Config(
             account_name="Liabilities:CreditCard:Amex:Personal",
             currency="NOK",
             account_id="XYZ|12345",  # From your QBO file
             transaction_patterns=[...],
         )),
-        Importer(AmexAccountConfig(
+        Importer(Config(
             account_name="Liabilities:CreditCard:Amex:Business",
             currency="NOK",
             account_id="XYZ|67890",
@@ -261,7 +261,7 @@ def get_importers():
 Transactions are automatically deduplicated using FITID (Financial Transaction ID). Re-running the import won't create duplicates. To force re-import:
 
 ```python
-AmexAccountConfig(
+Config(
     account_name="...",
     currency="NOK",
     skip_deduplication=True,  # Bypass FITID checking

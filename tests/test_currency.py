@@ -9,7 +9,7 @@ This priority ensures transactions use the most accurate currency.
 """
 
 
-from beancount_no_amex.credit import DEFAULT_CURRENCY, AmexAccountConfig, Importer
+from beancount_no_amex.credit import DEFAULT_CURRENCY, Config, Importer
 
 
 class TestDetermineCurrency:
@@ -17,7 +17,7 @@ class TestDetermineCurrency:
 
     Currency determination follows this priority:
     1. File currency (from CURDEF in QBO) - most accurate
-    2. Config currency (from AmexAccountConfig) - user preference
+    2. Config currency (from Config) - user preference
     3. DEFAULT_CURRENCY ("NOK") - fallback for Norwegian Amex
     """
 
@@ -28,7 +28,7 @@ class TestDetermineCurrency:
 
     def test_config_currency_when_file_has_none(self):
         """Use config currency when file doesn't specify one."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="EUR",  # Configured currency
         )
@@ -40,7 +40,7 @@ class TestDetermineCurrency:
         """DEFAULT_CURRENCY used when both file and config are None."""
         # This shouldn't happen in practice (config always has currency)
         # but the code handles it gracefully
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
         )
@@ -64,7 +64,7 @@ class TestDetermineCurrency:
 
     def test_various_currency_codes(self):
         """Test with various international currency codes."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
         )
@@ -109,7 +109,7 @@ class TestCurrencyInExtractedTransactions:
         qbo_file = tmp_path / "activity.qbo"
         qbo_file.write_text(qbo_with_usd_currency)
 
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex:USD",
             currency="USD",
             account_id="USD|99999",
@@ -131,7 +131,7 @@ class TestCurrencyInExtractedTransactions:
         qbo_file = tmp_path / "activity.qbo"
         qbo_file.write_text(qbo_without_currency)
 
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="SEK",  # Swedish Krona as config default
             account_id="ABC|11111",

@@ -1,6 +1,7 @@
 import datetime
 import sys
 import traceback
+import warnings
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -43,7 +44,7 @@ DEFAULT_PAYMENT_PATTERNS = ("AUTOGIROBETALING",)
 
 
 @dataclass
-class AmexAccountConfig:
+class Config:
     """Configuration for an American Express QBO account.
 
     Attributes:
@@ -82,9 +83,9 @@ class AmexAccountConfig:
                            importer to add balance assertions at the end of each statement.
 
     Example:
-        from beancount_no_amex import AmexAccountConfig, TransactionPattern, AccountSplit, amount
+        from beancount_no_amex import Config, TransactionPattern, AccountSplit, amount
 
-        config = AmexAccountConfig(
+        config = Config(
             account_name='Liabilities:CreditCard:Amex',
             currency='NOK',
             default_account='Expenses:Uncategorized',  # Fallback for unmatched
@@ -125,7 +126,7 @@ class AmexAccountConfig:
         )
 
         # Review workflow: 50% confidence in classifications
-        review_config = AmexAccountConfig(
+        review_config = Config(
             account_name='Liabilities:CreditCard:Amex',
             currency='NOK',
             default_account='Expenses:NeedsReview',
@@ -145,6 +146,21 @@ class AmexAccountConfig:
     payment_patterns: tuple[str, ...] = DEFAULT_PAYMENT_PATTERNS
     skip_deduplication: bool = False
     generate_balance_assertions: bool = False
+
+
+AmexConfig = Config
+
+
+@dataclass
+class AmexAccountConfig(Config):
+    """Deprecated alias for Config."""
+
+    def __post_init__(self) -> None:
+        warnings.warn(
+            "AmexAccountConfig is deprecated; use Config or AmexConfig instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
 
 def parse_ofx_time(date_str: str) -> datetime.datetime:
@@ -214,7 +230,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
 
     def __init__(
         self,
-        config: AmexAccountConfig,  # Accept config object
+        config: Config,  # Accept config object
         flag: str = "*",
         debug: bool = False,
     ):
@@ -222,7 +238,7 @@ class Importer(ClassifierMixin, beangulp.Importer):
         Initialize the American Express QBO importer using a configuration object.
 
         Args:
-            config: An AmexAccountConfig object with account details.
+            config: A Config object with account details.
             flag: Transaction flag (default: "*").
             debug: Enable debug output (default: False).
         """

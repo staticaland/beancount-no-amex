@@ -14,7 +14,7 @@ from beancount.core.amount import Amount
 from beancount.core.number import D
 from beancount_classifier import AccountSplit, SharedExpense, TransactionPattern, amount
 
-from beancount_no_amex.credit import AmexAccountConfig, Importer
+from beancount_no_amex.credit import Config, Importer
 from beancount_no_amex.models import RawTransaction
 
 
@@ -170,7 +170,7 @@ class TestFinalizePatternMatching:
 
     def test_first_matching_pattern_wins(self):
         """First matching pattern is used (order matters)."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             transaction_patterns=[
@@ -348,7 +348,7 @@ class TestFinalizeTransactionPatterns:
     @pytest.fixture
     def importer_with_patterns(self):
         """Importer with transaction_patterns configured."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             transaction_patterns=[
@@ -526,7 +526,7 @@ class TestFinalizeAmountConditions:
     @pytest.fixture
     def importer_with_amount_patterns(self):
         """Importer with amount-based patterns."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             transaction_patterns=[
@@ -591,7 +591,7 @@ class TestFinalizeSplitTransactions:
     @pytest.fixture
     def importer_with_splits(self):
         """Importer with split transaction patterns."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             transaction_patterns=[
@@ -699,7 +699,7 @@ class TestFinalizeDefaultAccount:
     @pytest.fixture
     def importer_with_default(self):
         """Importer with default_account configured."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             default_account="Expenses:Uncategorized",
@@ -765,7 +765,7 @@ class TestFinalizeDefaultSplitPercentage:
     @pytest.fixture
     def importer_with_review_split(self):
         """Importer with default_split_percentage for review workflow."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             default_account="Expenses:NeedsReview",
@@ -833,7 +833,7 @@ class TestFinalizeDefaultSplitPercentage:
     @pytest.fixture
     def importer_with_split_and_review(self):
         """Importer with pattern splits AND default_split_percentage."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             default_account="Expenses:NeedsReview",
@@ -890,7 +890,7 @@ class TestFinalizeSharedExpenses:
     @pytest.fixture
     def importer_with_shared_expense(self):
         """Importer with shared expense patterns."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             transaction_patterns=[
@@ -951,7 +951,7 @@ class TestFinalizeSharedExpenses:
 
     def test_shared_expense_with_multiple_people(self):
         """Sharing with multiple people creates multiple receivable/offset pairs."""
-        config = AmexAccountConfig(
+        config = Config(
             account_name="Liabilities:CreditCard:Amex",
             currency="NOK",
             transaction_patterns=[

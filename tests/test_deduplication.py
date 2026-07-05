@@ -15,7 +15,7 @@ from beancount.core import data
 from beancount.core.amount import Amount
 from beancount.core.number import D
 
-from beancount_no_amex.credit import AmexAccountConfig, Importer
+from beancount_no_amex.credit import Config, Importer
 
 # =============================================================================
 # Fixtures
@@ -23,18 +23,18 @@ from beancount_no_amex.credit import AmexAccountConfig, Importer
 
 
 @pytest.fixture
-def config_with_deduplication() -> AmexAccountConfig:
+def config_with_deduplication() -> Config:
     """Configuration with deduplication enabled (default)."""
-    return AmexAccountConfig(
+    return Config(
         account_name="Liabilities:CreditCard:Amex",
         currency="NOK",
     )
 
 
 @pytest.fixture
-def config_skip_deduplication() -> AmexAccountConfig:
+def config_skip_deduplication() -> Config:
     """Configuration with deduplication disabled."""
-    return AmexAccountConfig(
+    return Config(
         account_name="Liabilities:CreditCard:Amex",
         currency="NOK",
         skip_deduplication=True,
