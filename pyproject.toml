@@ -17,7 +17,7 @@ package = true
 
 [tool.uv.sources]
 beangulp = { git = "https://github.com/beancount/beangulp" }
-beancount-classifier = { git = "https://github.com/staticaland/beancount-classifier", rev = "92b285ea2ef31b86c43772b0d1387b9bba5aed8b" }
+beancount-classifier = { path = "../beancount-classifier" }
 
 [build-system]
 requires = ["hatchling"]
