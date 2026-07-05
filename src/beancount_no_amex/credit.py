@@ -1,6 +1,5 @@
 import datetime
-import sys
-import traceback
+import logging
 import warnings
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -41,6 +40,8 @@ OFX_STATEMENT_TYPES = ("STMTRS", "CCSTMTRS", "INVSTMTRS")
 # (configurable) list of case-insensitive substrings. "AUTOGIROBETALING" is
 # the direct-debit settlement from the linked bank account.
 DEFAULT_PAYMENT_PATTERNS = ("AUTOGIROBETALING",)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -266,6 +267,9 @@ class Importer(ClassifierMixin, beangulp.Importer):
         self.generate_balance_assertions = config.generate_balance_assertions
         self.flag = flag
         self.debug = debug
+        self.logger = logger.getChild(f"{self.__class__.__name__}.{id(self)}")
+        if debug:
+            self.logger.setLevel(logging.DEBUG)
         self.dedup_window = datetime.timedelta(days=3)
 
     def _parse_qbo_file(self, filepath: str) -> QboFileData:
@@ -339,12 +343,10 @@ class Importer(ClassifierMixin, beangulp.Importer):
             return result
 
         except etree.XMLSyntaxError as e:
-            if self.debug:
-                print(f"XML syntax error: {e}", file=sys.stderr)
+            self.logger.warning("XML syntax error in %s: %s", filepath, e)
             return QboFileData()
         except Exception:
-            if self.debug:
-                print(f"Error parsing QBO file: {traceback.format_exc()}", file=sys.stderr)
+            self.logger.exception("Error parsing QBO file %s", filepath)
             return QboFileData()
 
     def _determine_currency(self, file_currency: str | None) -> str:
@@ -361,12 +363,10 @@ class Importer(ClassifierMixin, beangulp.Importer):
             The currency code to use for transactions
         """
         if file_currency:
-            if self.debug:
-                print(f"Using currency from file: {file_currency}", file=sys.stderr)
+            self.logger.debug("Using currency from file: %s", file_currency)
             return file_currency
 
-        if self.debug:
-            print(f"File currency not found, using default: {self.currency}", file=sys.stderr)
+        self.logger.debug("File currency not found, using default: %s", self.currency)
 
         # Default currency should never be None, but use DEFAULT_CURRENCY as fallback
         return self.currency or DEFAULT_CURRENCY
@@ -518,8 +518,10 @@ class Importer(ClassifierMixin, beangulp.Importer):
         # 1. Parse the QBO file content
         qbo_data = self._parse_qbo_file(filepath)
         if not qbo_data:  # Check if parsing returned data
-            if self.debug:
-                print(f"Skipping file {filepath} due to parsing errors or empty content.", file=sys.stderr)
+            self.logger.debug(
+                "Skipping file %s due to parsing errors or empty content.",
+                filepath,
+            )
             return []
 
         # 2. Determine the currency to use
@@ -530,8 +532,11 @@ class Importer(ClassifierMixin, beangulp.Importer):
             try:
                 # 3a. Validate and parse essential raw data
                 if not raw_txn.date:
-                    if self.debug:
-                        print(f"Skipping transaction {idx} in {filepath} due to missing date.", file=sys.stderr)
+                    self.logger.warning(
+                        "Skipping transaction %s in %s due to missing date.",
+                        idx,
+                        filepath,
+                    )
                     continue
 
                 txn_date = parse_ofx_time(raw_txn.date).date()
@@ -546,8 +551,11 @@ class Importer(ClassifierMixin, beangulp.Importer):
                 if self.skip_payments and any(
                     pattern in description for pattern in self.payment_patterns
                 ):
-                    if self.debug:
-                        print(f"Skipping payment entry {idx} ({payee or memo})", file=sys.stderr)
+                    self.logger.debug(
+                        "Skipping payment entry %s (%s)",
+                        idx,
+                        payee or memo,
+                    )
                     continue
 
                 # Use payee as narration, fallback to memo if payee is missing
@@ -568,9 +576,14 @@ class Importer(ClassifierMixin, beangulp.Importer):
                     # Convert amount string to Decimal
                     amount_decimal = D(amount_str)
                 except Exception as e:
-                     if self.debug:
-                         print(f"Skipping transaction {idx} in {filepath} due to invalid amount '{amount_str}': {e}", file=sys.stderr)
-                     continue
+                    self.logger.warning(
+                        "Skipping transaction %s in %s due to invalid amount %r: %s",
+                        idx,
+                        filepath,
+                        amount_str,
+                        e,
+                    )
+                    continue
 
                 amount_obj = Amount(amount_decimal, currency)
                 primary_posting = data.Posting(
@@ -594,21 +607,32 @@ class Importer(ClassifierMixin, beangulp.Importer):
 
                 # Skip if finalization failed or indicated skipping
                 if finalized_txn is None:
-                    if self.debug:
-                        print(f"Skipping transaction {idx} in {filepath} after finalization.", file=sys.stderr)
+                    self.logger.debug(
+                        "Skipping transaction %s in %s after finalization.",
+                        idx,
+                        filepath,
+                    )
                     continue
 
                 # 3f. Add the completed transaction to the list
                 entries.append(finalized_txn)
 
             except (ValueError, ValidationError) as e: # Catch known parsing/validation errors
-                if self.debug:
-                    print(f"Error processing transaction {idx} in {filepath}: {e}\nRaw data: {raw_txn}", file=sys.stderr)
+                self.logger.warning(
+                    "Error processing transaction %s in %s: %s; raw data: %s",
+                    idx,
+                    filepath,
+                    e,
+                    raw_txn,
+                )
                 continue
-            except Exception as e: # Catch unexpected errors during processing
-                 if self.debug:
-                     print(f"Unexpected error processing transaction {idx} in {filepath}: {e}\n{traceback.format_exc()}", file=sys.stderr)
-                 continue # Skip to next transaction
+            except Exception:
+                self.logger.exception(
+                    "Unexpected error processing transaction %s in %s",
+                    idx,
+                    filepath,
+                )
+                continue # Skip to next transaction
 
         # 4. Add balance assertion if enabled and available
         if self.generate_balance_assertions and qbo_data.balance is not None and qbo_data.balance_date:
@@ -631,12 +655,19 @@ class Importer(ClassifierMixin, beangulp.Importer):
                     diff_amount=None
                 )
                 entries.append(balance_entry)
-                if self.debug:
-                    print(f"Added balance assertion for {self.account_name} on {balance_assertion_date}: {balance_amount}", file=sys.stderr)
+                self.logger.debug(
+                    "Added balance assertion for %s on %s: %s",
+                    self.account_name,
+                    balance_assertion_date,
+                    balance_amount,
+                )
 
             except Exception as e: # Catch potential errors creating balance assertion
-                 if self.debug:
-                     print(f"Could not create balance assertion for {filepath}: {e}", file=sys.stderr)
+                self.logger.warning(
+                    "Could not create balance assertion for %s: %s",
+                    filepath,
+                    e,
+                )
 
         if existing_entries:
             self.deduplicate(entries, existing_entries)
